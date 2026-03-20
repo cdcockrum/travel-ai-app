@@ -1,7 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import advisory, auth, itinerary, profile, recommendations, trips
+from app.routers import (
+    advisory,
+    auth,
+    itinerary,
+    profile,
+    recommendations,
+    trips,
+    weather,
+)
 from app.services.trip_store import init_db
 
 app = FastAPI(title="Travel Advisory App API")
@@ -30,6 +38,7 @@ app.include_router(
     prefix="/api/recommendations",
     tags=["recommendations"],
 )
+app.include_router(weather.router, prefix="/api/weather", tags=["weather"])
 
 
 @app.get("/health")

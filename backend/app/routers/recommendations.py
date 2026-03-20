@@ -23,22 +23,34 @@ def get_trip_recommendations(trip_id: str) -> dict:
     notes = trip.get("notes", "")
     budget_level = trip.get("budget_level", "moderate")
 
+    restaurants = []
+    attractions = []
+    errors: list[str] = []
+
     try:
         restaurants = simplify_places(
             get_restaurant_recommendations(city=city, country=country, notes=notes)
         )
+    except Exception as exc:
+        errors.append(f"Restaurants unavailable: {exc}")
+
+    try:
         attractions = simplify_places(
             get_attraction_recommendations(city=city, country=country, notes=notes)
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Places API error: {exc}") from exc
+        errors.append(f"Attractions unavailable: {exc}")
 
-    hotels = get_hotel_recommendations(
-        city=city,
-        country=country,
-        notes=notes,
-        budget_level=budget_level,
-    )
+    try:
+        hotels = get_hotel_recommendations(
+            city=city,
+            country=country,
+            notes=notes,
+            budget_level=budget_level,
+        )
+    except Exception as exc:
+        hotels = []
+        errors.append(f"Hotels unavailable: {exc}")
 
     return {
         "trip_id": trip_id,
@@ -47,4 +59,5 @@ def get_trip_recommendations(trip_id: str) -> dict:
         "restaurants": restaurants,
         "attractions": attractions,
         "hotels": hotels,
+        "errors": errors,
     }

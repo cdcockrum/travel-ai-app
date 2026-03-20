@@ -28,20 +28,25 @@ def _cluster_places_by_area(places: list[dict]) -> dict[str, list[dict]]:
     return dict(clusters)
 
 
-def _rank_places(places: list[dict], food_weight: int = 0, culture_weight: int = 0) -> list[dict]:
+def _rank_places(
+    places: list[dict], food_weight: int = 0, culture_weight: int = 0
+) -> list[dict]:
     def score(p: dict) -> tuple:
         base_rating = p.get("rating") or 0
         review_count = p.get("user_rating_count") or 0
         type_text = " ".join(p.get("types", []) or []).lower()
 
         boost = 0
-        if food_weight and ("restaurant" in type_text or "food" in type_text or "cafe" in type_text):
+        if food_weight and (
+            "restaurant" in type_text or "food" in type_text or "cafe" in type_text
+        ):
             boost += food_weight
         if culture_weight and (
             "museum" in type_text
             or "tourist_attraction" in type_text
             or "art_gallery" in type_text
             or "cultural" in type_text
+            or "temple" in type_text
         ):
             boost += culture_weight
 
@@ -53,6 +58,7 @@ def _rank_places(places: list[dict], food_weight: int = 0, culture_weight: int =
 def _add_place(day_places: list[dict], place: dict | None, category: str) -> None:
     if not place:
         return
+
     day_places.append(
         {
             "name": place.get("name"),
@@ -103,6 +109,7 @@ def _build_day(
     walking_tolerance: str,
     structure_preference: str,
     day_start_preference: str,
+    relaxed: bool,
 ) -> dict:
     day_places: list[dict] = []
 
@@ -145,20 +152,28 @@ def _build_day(
 
     if food_focused and r1:
         if adventurous_food:
-            breakfast.append(f"Try a distinctive local breakfast, pastry, or coffee near {r1['name']}")
+            breakfast.append(
+                f"Try a distinctive local breakfast, pastry, or coffee near {r1['name']}"
+            )
         else:
             breakfast.append(f"Have an easy breakfast or coffee near {r1['name']}")
         _add_place(day_places, r1, "restaurant")
     else:
         breakfast.append("Take a relaxed breakfast near your first stop")
 
-    if a2:
-        afternoon.append(f"Continue on to {a2['name']}")
-        _add_place(day_places, a2, "attraction")
-    elif a1 and day_start_preference != "late":
-        afternoon.append(f"Spend more time around {a1['name']}")
-    elif not afternoon:
-        afternoon.append("Keep the afternoon open for neighborhood exploration")
+    if not relaxed:
+        if a2:
+            afternoon.append(f"Continue on to {a2['name']}")
+            _add_place(day_places, a2, "attraction")
+        elif a1 and day_start_preference != "late":
+            afternoon.append(f"Spend more time around {a1['name']}")
+        elif not afternoon:
+            afternoon.append("Keep the afternoon open for neighborhood exploration")
+    else:
+        if a1 and day_start_preference != "late":
+            afternoon.append(f"Take your time around {a1['name']}")
+        else:
+            afternoon.append("Keep the afternoon intentionally light and flexible")
 
     if r2:
         lunch.append(f"Lunch at or near {r2['name']}")
@@ -168,7 +183,7 @@ def _build_day(
     else:
         lunch.append("Pick a well-rated local lunch spot nearby")
 
-    if r3:
+    if r3 and not relaxed:
         dinner.append(f"Dinner at {r3['name']}")
         _add_place(day_places, r3, "restaurant")
     elif r2:
@@ -182,6 +197,9 @@ def _build_day(
         afternoon = afternoon[:1]
         evening = ["Keep the evening quiet and close to your base"]
         note = "This day is intentionally compact to reduce walking and keep transitions easy."
+    elif relaxed:
+        evening = ["Leave room for rest, wandering, or one spontaneous stop"]
+        note = "This is a lighter day with more breathing room, but it still preserves the full trip length."
     elif structure_preference == "fully planned":
         evening = ["End the day with a planned final stop or a reservation"]
         note = "This day is structured clearly so you do not need to improvise much."
@@ -238,6 +256,7 @@ def generate_itinerary(trip_id: str) -> dict:
     )
     is_balanced_discoverer = pace_level == "balanced" or "balanced discoverer" in notes
     adventurous_food = food_adventure_level == "high"
+    relaxed = pace_level == "relaxed"
 
     restaurants = []
     attractions = []
@@ -298,12 +317,7 @@ def generate_itinerary(trip_id: str) -> dict:
     end_date = date.fromisoformat(trip["end_date"])
     trip_length = max(1, (end_date - start_date).days + 1)
 
-    if pace_level == "relaxed":
-        target_days = max(2, trip_length - 1)
-    else:
-        target_days = trip_length
-
-    day_count = min(max(target_days, 1), trip_length)
+    day_count = trip_length
 
     if len(all_areas) < day_count:
         while len(all_areas) < day_count:
@@ -336,10 +350,13 @@ def generate_itinerary(trip_id: str) -> dict:
             walking_tolerance=walking_tolerance,
             structure_preference=structure_preference,
             day_start_preference=day_start_preference,
+            relaxed=relaxed,
         )
         days.append(day)
 
-    summary_parts = [f"A personalized itinerary for {destination_city}, {destination_country}."]
+    summary_parts = [
+        f"A personalized itinerary for {destination_city}, {destination_country}."
+    ]
     if selected_hotel:
         summary_parts.append(
             f"Suggested hotel base: {selected_hotel['name']} in {selected_hotel['area']}."
@@ -348,7 +365,7 @@ def generate_itinerary(trip_id: str) -> dict:
         summary_parts.append("Food experiences are weighted more heavily throughout the trip.")
     if is_culture_focused:
         summary_parts.append("Cultural and architectural stops are prioritized.")
-    if pace_level == "relaxed":
+    if relaxed:
         summary_parts.append("The schedule is intentionally lighter with more breathing room.")
     elif pace_level == "packed":
         summary_parts.append("The trip packs in more activity and variety each day.")
@@ -358,7 +375,9 @@ def generate_itinerary(trip_id: str) -> dict:
         summary_parts.append("Each day is laid out in a more structured way.")
     if authenticity >= 4:
         summary_parts.append("Recommendations lean more local and less convenience-driven.")
-    summary_parts.append("Days are grouped by neighborhood to reduce backtracking and make the trip feel more natural.")
+    summary_parts.append(
+        "Days are grouped by neighborhood to reduce backtracking and make the trip feel more natural."
+    )
 
     return {
         "trip_summary": " ".join(summary_parts),
