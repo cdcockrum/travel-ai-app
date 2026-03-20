@@ -1,17 +1,25 @@
-# Node
+# macOS
+.DS_Store
+
+# Node / Next
 node_modules/
 .next/
+out/
 
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 
 # Env files
 .env
 .env.*
-backend/.env
 frontend/.env.local
+backend/.env
 
-# OS junk
-.DS_Store
+# Database
+*.db
+
+# Logs
+*.log
