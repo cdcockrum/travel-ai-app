@@ -4,7 +4,6 @@ from app.services.hotel_service import get_hotel_recommendations
 from app.services.places_service import (
     get_attraction_recommendations,
     get_restaurant_recommendations,
-    simplify_places,
 )
 from app.services.trip_store import get_trip
 
@@ -22,35 +21,34 @@ def get_trip_recommendations(trip_id: str) -> dict:
     country = trip.get("destination_country")
     notes = trip.get("notes", "")
     budget_level = trip.get("budget_level", "moderate")
+    profile = trip.get("profile") or {}
+    dietary_prefs = profile.get("dietary_preferences", [])
 
     restaurants = []
     attractions = []
+    hotels = []
     errors: list[str] = []
 
     try:
-        restaurants = simplify_places(
-            get_restaurant_recommendations(city=city, country=country, notes=notes)
-        )
-
-        raw_restaurants = get_restaurant_recommendations(
+        restaurants = get_restaurant_recommendations(
             city=city,
             country=country,
-            notes=notes
+            notes=notes,
+            dietary_prefs=dietary_prefs,
         )
-
-        restaurants = simplify_places(
-            rank_places(raw_restaurants, dietary_prefs=trip.get("profile", {}).get("dietary_preferences"))
-        )
-        
     except Exception as exc:
         errors.append(f"Restaurants unavailable: {exc}")
+        print("RECOMMENDATIONS ROUTER ERROR - RESTAURANTS:", repr(exc))
 
     try:
-        attractions = simplify_places(
-            get_attraction_recommendations(city=city, country=country, notes=notes)
+        attractions = get_attraction_recommendations(
+            city=city,
+            country=country,
+            notes=notes,
         )
     except Exception as exc:
         errors.append(f"Attractions unavailable: {exc}")
+        print("RECOMMENDATIONS ROUTER ERROR - ATTRACTIONS:", repr(exc))
 
     try:
         hotels = get_hotel_recommendations(
@@ -60,12 +58,8 @@ def get_trip_recommendations(trip_id: str) -> dict:
             budget_level=budget_level,
         )
     except Exception as exc:
-        hotels = []
         errors.append(f"Hotels unavailable: {exc}")
-
-    print("DEBUG:")
-    print("Restaurants:", len(restaurants))
-    print("Attractions:", len(attractions))
+        print("RECOMMENDATIONS ROUTER ERROR - HOTELS:", repr(exc))
 
     return {
         "trip_id": trip_id,

@@ -190,19 +190,11 @@ def get_restaurant_recommendations(
     if "hidden gems" in notes_lower or "local" in notes_lower:
         queries.insert(0, f"local hidden gem restaurants in {city}, {country}")
 
-    print("\n===== RESTAURANT QUERY DEBUG =====")
-    print("CITY:", city)
-    print("COUNTRY:", country)
-    print("DIETARY PREFS:", dietary_prefs)
-    print("QUERIES:", queries[:5])
-    print("===== END RESTAURANT QUERY DEBUG =====\n")
-
     all_places: list[dict[str, Any]] = []
     for query in queries[:5]:
         try:
             results = _search_text(query, max_result_count=8)
             simplified = simplify_places(results)
-            print(f"Restaurant query returned {len(simplified)} usable places: {query}")
             all_places.extend(simplified)
         except Exception as exc:
             print(f"Restaurant query failed: {query}")
@@ -240,18 +232,11 @@ def get_attraction_recommendations(
     if "nature" in notes_lower:
         queries.insert(0, f"best parks and gardens in {city}, {country}")
 
-    print("\n===== ATTRACTION QUERY DEBUG =====")
-    print("CITY:", city)
-    print("COUNTRY:", country)
-    print("QUERIES:", queries[:5])
-    print("===== END ATTRACTION QUERY DEBUG =====\n")
-
     all_places: list[dict[str, Any]] = []
     for query in queries[:5]:
         try:
             results = _search_text(query, max_result_count=8)
             simplified = simplify_places(results)
-            print(f"Attraction query returned {len(simplified)} usable places: {query}")
             all_places.extend(simplified)
         except Exception as exc:
             print(f"Attraction query failed: {query}")
