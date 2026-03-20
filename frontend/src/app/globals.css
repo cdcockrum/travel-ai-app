@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  color: var(--foreground);
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.glass-card {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.card {
+  backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+}
