@@ -1,4 +1,17 @@
+# Node
+node_modules/
+.next/
 
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Env files
 .env
 .env.*
 backend/.env
+frontend/.env.local
+
+# OS junk
+.DS_Store
