@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -17,27 +17,46 @@ export default function MapView({ places }: { places: Place[] }) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!mapContainer.current || !MAPBOX_TOKEN) return;
+    if (!mapContainer.current) return;
 
-    mapboxgl.accessToken = MAPBOX_TOKEN;
+    if (!MAPBOX_TOKEN) {
+      setMapError("Map is unavailable because NEXT_PUBLIC_MAPBOX_TOKEN is missing.");
+      return;
+    }
 
-    const map = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: "mapbox://styles/mapbox/streets-v12",
-      center: [139.75, 35.68],
-      zoom: 11,
-    });
+    try {
+      mapboxgl.accessToken = MAPBOX_TOKEN;
 
-    map.addControl(new mapboxgl.NavigationControl(), "top-right");
-    mapRef.current = map;
+      const map = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: "mapbox://styles/mapbox/streets-v12",
+        center: [139.75, 35.68],
+        zoom: 11,
+      });
 
-    return () => {
-      markersRef.current.forEach((marker) => marker.remove());
-      markersRef.current = [];
-      map.remove();
-    };
+      map.on("error", () => {
+        setMapError(
+          "Map could not load. Please verify your Mapbox public token and allowed domains."
+        );
+      });
+
+      map.addControl(new mapboxgl.NavigationControl(), "top-right");
+      mapRef.current = map;
+
+      return () => {
+        markersRef.current.forEach((marker) => marker.remove());
+        markersRef.current = [];
+        map.remove();
+      };
+    } catch (error) {
+      console.error("Map initialization error:", error);
+      setMapError(
+        "Map could not initialize. Please verify your Mapbox setup."
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -90,10 +109,10 @@ export default function MapView({ places }: { places: Place[] }) {
     mapRef.current.fitBounds(bounds, { padding: 50, maxZoom: 13 });
   }, [places]);
 
-  if (!MAPBOX_TOKEN) {
+  if (mapError) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        Map is unavailable because NEXT_PUBLIC_MAPBOX_TOKEN is missing.
+        {mapError}
       </div>
     );
   }
