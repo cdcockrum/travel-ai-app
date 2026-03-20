@@ -5,7 +5,6 @@ from app.services.hotel_service import get_hotel_recommendations
 from app.services.places_service import (
     get_attraction_recommendations,
     get_restaurant_recommendations,
-    simplify_places,
 )
 from app.services.trip_store import get_trip
 
@@ -15,44 +14,47 @@ def _extract_area(address: str | None) -> str:
         return "Central District"
 
     parts = [p.strip() for p in address.split(",") if p.strip()]
+
+    if len(parts) >= 3:
+        return parts[-3]
     if len(parts) >= 2:
-        return parts[1]
-    return parts[0] if parts else "Central District"
+        return parts[-2]
+    return parts[0]
 
 
 def _cluster_places_by_area(places: list[dict]) -> dict[str, list[dict]]:
-    clusters: dict[str, list[dict]] = defaultdict(list)
+    grouped: dict[str, list[dict]] = defaultdict(list)
+
     for place in places:
         area = _extract_area(place.get("address"))
-        clusters[area].append(place)
-    return dict(clusters)
+        grouped[area].append(place)
+
+    return dict(grouped)
 
 
-def _rank_places(
-    places: list[dict], food_weight: int = 0, culture_weight: int = 0
-) -> list[dict]:
-    def score(p: dict) -> tuple:
-        base_rating = p.get("rating") or 0
-        review_count = p.get("user_rating_count") or 0
-        type_text = " ".join(p.get("types", []) or []).lower()
+def _rank_places(places: list[dict]) -> list[dict]:
+    return sorted(
+        places,
+        key=lambda p: (
+            p.get("rating") or 0,
+            p.get("user_rating_count") or 0,
+        ),
+        reverse=True,
+    )
 
-        boost = 0
-        if food_weight and (
-            "restaurant" in type_text or "food" in type_text or "cafe" in type_text
-        ):
-            boost += food_weight
-        if culture_weight and (
-            "museum" in type_text
-            or "tourist_attraction" in type_text
-            or "art_gallery" in type_text
-            or "cultural" in type_text
-            or "temple" in type_text
-        ):
-            boost += culture_weight
 
-        return (base_rating + boost, review_count)
+def _unique_by_id(places: list[dict]) -> list[dict]:
+    seen = set()
+    unique = []
 
-    return sorted(places, key=score, reverse=True)
+    for place in places:
+        pid = place.get("id")
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        unique.append(place)
+
+    return unique
 
 
 def _add_place(day_places: list[dict], place: dict | None, category: str) -> None:
@@ -71,64 +73,80 @@ def _add_place(day_places: list[dict], place: dict | None, category: str) -> Non
     )
 
 
-def _pick_restaurants_for_day(
-    area_restaurants: list[dict],
-    all_restaurants: list[dict],
-) -> list[dict]:
-    ranked_area = _rank_places(area_restaurants, food_weight=1)
-    if len(ranked_area) >= 3:
-        return ranked_area[:3]
+def _rotate_list(items: list[dict], start_idx: int, count: int) -> list[dict]:
+    if not items:
+        return []
 
-    ranked_all = _rank_places(all_restaurants, food_weight=1)
+    result = []
+    n = len(items)
 
-    seen_ids = set()
-    chosen: list[dict] = []
+    for i in range(count):
+        result.append(items[(start_idx + i) % n])
 
-    for place in ranked_area + ranked_all:
-        place_id = place.get("id")
-        if place_id in seen_ids:
-            continue
-        seen_ids.add(place_id)
-        chosen.append(place)
-        if len(chosen) == 3:
-            break
-
-    return chosen
+    return result
 
 
-def _build_day(
+def _theme_for_day(
     day_number: int,
-    theme: str,
-    neighborhood: str,
+    total_days: int,
+    has_food_focus: bool,
+    has_culture_focus: bool,
+    area: str,
+) -> str:
+    if day_number == 1:
+        return "Arrival and neighborhood immersion"
+    if day_number == total_days:
+        return f"Final day in {area}"
+
+    if has_food_focus and has_culture_focus:
+        return f"Food and culture in {area}"
+    if has_food_focus:
+        return f"Culinary exploration in {area}"
+    if has_culture_focus:
+        return f"Cultural highlights in {area}"
+
+    return f"Explore {area}"
+
+
+def _build_day_plan(
+    day_number: int,
+    total_days: int,
+    area: str,
     hotel: dict | None,
     attractions: list[dict],
-    restaurants_for_day: list[dict],
-    balanced: bool,
-    food_focused: bool,
-    adventurous_food: bool,
-    walking_tolerance: str,
-    structure_preference: str,
+    restaurants: list[dict],
+    pace_level: str,
     day_start_preference: str,
-    relaxed: bool,
+    has_food_focus: bool,
+    has_culture_focus: bool,
 ) -> dict:
     day_places: list[dict] = []
 
-    a1 = attractions[0] if len(attractions) > 0 else None
-    a2 = attractions[1] if len(attractions) > 1 else None
+    attraction_1 = attractions[0] if len(attractions) > 0 else None
+    attraction_2 = attractions[1] if len(attractions) > 1 else None
+    attraction_3 = attractions[2] if len(attractions) > 2 else None
 
-    r1 = restaurants_for_day[0] if len(restaurants_for_day) > 0 else None
-    r2 = restaurants_for_day[1] if len(restaurants_for_day) > 1 else None
-    r3 = restaurants_for_day[2] if len(restaurants_for_day) > 2 else None
+    breakfast_spot = restaurants[0] if len(restaurants) > 0 else None
+    lunch_spot = restaurants[1] if len(restaurants) > 1 else None
+    dinner_spot = restaurants[2] if len(restaurants) > 2 else None
 
-    morning = []
-    breakfast = []
-    lunch = []
-    afternoon = []
-    dinner = []
-    evening = []
+    morning: list[str] = []
+    breakfast: list[str] = []
+    lunch: list[str] = []
+    afternoon: list[str] = []
+    dinner: list[str] = []
+    evening: list[str] = []
+
+    theme = _theme_for_day(
+        day_number=day_number,
+        total_days=total_days,
+        has_food_focus=has_food_focus,
+        has_culture_focus=has_culture_focus,
+        area=area,
+    )
 
     if day_number == 1 and hotel:
-        morning.append(f"Check-in at {hotel['name']}")
+        morning.append(f"Check in or drop bags at {hotel['name']}")
         day_places.append(
             {
                 "name": hotel["name"],
@@ -139,81 +157,72 @@ def _build_day(
                 "google_maps_url": None,
             }
         )
-    elif day_start_preference == "late":
-        morning.append("Start slowly and ease into the day with a lighter first stop")
-        if a1:
-            afternoon.insert(0, f"Visit {a1['name']}")
-            _add_place(day_places, a1, "attraction")
-    elif a1:
-        morning.append(f"Start the day at {a1['name']}")
-        _add_place(day_places, a1, "attraction")
-    else:
-        morning.append("Start with a gentle neighborhood walk")
 
-    if food_focused and r1:
-        if adventurous_food:
-            breakfast.append(
-                f"Try a distinctive local breakfast, pastry, or coffee near {r1['name']}"
-            )
+    if day_start_preference == "late":
+        if attraction_1:
+            morning.append(f"Ease into the day with a later start near {attraction_1['name']}")
+            _add_place(day_places, attraction_1, "attraction")
         else:
-            breakfast.append(f"Have an easy breakfast or coffee near {r1['name']}")
-        _add_place(day_places, r1, "restaurant")
+            morning.append(f"Take a relaxed start in {area}")
     else:
-        breakfast.append("Take a relaxed breakfast near your first stop")
-
-    if not relaxed:
-        if a2:
-            afternoon.append(f"Continue on to {a2['name']}")
-            _add_place(day_places, a2, "attraction")
-        elif a1 and day_start_preference != "late":
-            afternoon.append(f"Spend more time around {a1['name']}")
-        elif not afternoon:
-            afternoon.append("Keep the afternoon open for neighborhood exploration")
-    else:
-        if a1 and day_start_preference != "late":
-            afternoon.append(f"Take your time around {a1['name']}")
+        if attraction_1:
+            morning.append(f"Start the day at {attraction_1['name']}")
+            _add_place(day_places, attraction_1, "attraction")
         else:
-            afternoon.append("Keep the afternoon intentionally light and flexible")
+            morning.append(f"Begin with a walk through {area}")
 
-    if r2:
-        lunch.append(f"Lunch at or near {r2['name']}")
-        _add_place(day_places, r2, "restaurant")
-    elif r1:
-        lunch.append(f"Lunch in the area around {r1['name']}")
+    if breakfast_spot:
+        breakfast.append(f"Breakfast or coffee near {breakfast_spot['name']}")
+        _add_place(day_places, breakfast_spot, "restaurant")
     else:
-        lunch.append("Pick a well-rated local lunch spot nearby")
+        breakfast.append(f"Have a relaxed breakfast in {area}")
 
-    if r3 and not relaxed:
-        dinner.append(f"Dinner at {r3['name']}")
-        _add_place(day_places, r3, "restaurant")
-    elif r2:
-        dinner.append(f"Dinner near {r2['name']}")
-    elif r1:
-        dinner.append(f"Return to the area around {r1['name']} for dinner")
+    if attraction_2:
+        lunch.append(f"Continue toward {attraction_2['name']} before lunch")
+        _add_place(day_places, attraction_2, "attraction")
+    elif has_culture_focus and attraction_1:
+        lunch.append(f"Spend more time exploring around {attraction_1['name']}")
+    else:
+        lunch.append(f"Keep lunch flexible while exploring {area}")
+
+    if lunch_spot:
+        lunch.append(f"Lunch at or near {lunch_spot['name']}")
+        _add_place(day_places, lunch_spot, "restaurant")
+    else:
+        lunch.append("Choose a highly rated local lunch spot nearby")
+
+    if attraction_3:
+        afternoon.append(f"Visit {attraction_3['name']} in the afternoon")
+        _add_place(day_places, attraction_3, "attraction")
+    elif attraction_2:
+        afternoon.append(f"Explore the surrounding streets after {attraction_2['name']}")
+    elif has_food_focus:
+        afternoon.append(f"Use the afternoon to browse food-focused areas in {area}")
+    else:
+        afternoon.append(f"Keep the afternoon open for neighborhood exploration in {area}")
+
+    if dinner_spot:
+        dinner.append(f"Dinner at {dinner_spot['name']}")
+        _add_place(day_places, dinner_spot, "restaurant")
+    elif lunch_spot:
+        dinner.append(f"Choose another well-rated dinner spot in the same area as {lunch_spot['name']}")
     else:
         dinner.append("Choose a memorable local dinner")
 
-    if walking_tolerance == "low":
-        afternoon = afternoon[:1]
-        evening = ["Keep the evening quiet and close to your base"]
-        note = "This day is intentionally compact to reduce walking and keep transitions easy."
-    elif relaxed:
-        evening = ["Leave room for rest, wandering, or one spontaneous stop"]
-        note = "This is a lighter day with more breathing room, but it still preserves the full trip length."
-    elif structure_preference == "fully planned":
-        evening = ["End the day with a planned final stop or a reservation"]
-        note = "This day is structured clearly so you do not need to improvise much."
-    elif balanced:
-        evening = ["Keep the evening flexible for a walk or a relaxed drink"]
-        note = "Meals and activities are spaced out to keep the day enjoyable and realistic."
+    if pace_level == "relaxed":
+        evening.append("Leave the evening flexible for wandering, rest, or one spontaneous stop")
+        practical_note = "This day is intentionally lighter and more flexible while still staying anchored to one neighborhood."
+    elif pace_level == "packed":
+        evening.append("Add one final stop, dessert spot, or evening viewpoint if energy allows")
+        practical_note = "This day is designed to fit in more variety while keeping the route geographically coherent."
     else:
-        evening = ["Use the evening for one final stop or an easy neighborhood stroll"]
-        note = "The day is grouped geographically to reduce transit and create a smoother flow."
+        evening.append("Keep the evening open for a stroll, dessert, or a relaxed drink nearby")
+        practical_note = "Meals and activities are spaced out to keep the day enjoyable and realistic."
 
     return {
         "day_number": day_number,
         "theme": theme,
-        "neighborhood": neighborhood,
+        "neighborhood": area,
         "morning": morning,
         "breakfast": breakfast,
         "lunch": lunch,
@@ -221,7 +230,7 @@ def _build_day(
         "dinner": dinner,
         "evening": evening,
         "places": day_places,
-        "practical_note": note,
+        "practical_note": practical_note,
     }
 
 
@@ -233,65 +242,55 @@ def generate_itinerary(trip_id: str) -> dict:
 
     destination_city = trip.get("destination_city", "the city")
     destination_country = trip.get("destination_country", "")
-    notes = (trip.get("notes") or "").lower()
+    notes = trip.get("notes", "")
+    notes_lower = notes.lower()
     budget_level = trip.get("budget_level", "moderate")
     profile = trip.get("profile") or {}
 
+    dietary_prefs = profile.get("dietary_preferences", [])
     pace_level = profile.get("pace_level", "balanced")
-    walking_tolerance = profile.get("walking_tolerance", "moderate")
-    food_adventure_level = profile.get("food_adventure_level", "moderate")
-    structure_preference = profile.get(
-        "structure_preference", "some structure with flexibility"
-    )
-    authenticity = profile.get("convenience_vs_authenticity", 3)
-    top_interests = profile.get("top_interests", [])
     day_start_preference = profile.get("day_start_preference", "mid-morning")
+    top_interests = profile.get("top_interests", [])
 
-    is_food_focused = "food" in top_interests or "food" in notes
-    is_culture_focused = (
-        "architecture" in top_interests
-        or "local culture" in top_interests
-        or "culture" in notes
-        or "architecture" in notes
+    has_food_focus = "food" in top_interests or "food" in notes_lower
+    has_culture_focus = (
+        "local culture" in top_interests
+        or "architecture" in top_interests
+        or "culture" in notes_lower
+        or "architecture" in notes_lower
+        or "museum" in notes_lower
     )
-    is_balanced_discoverer = pace_level == "balanced" or "balanced discoverer" in notes
-    adventurous_food = food_adventure_level == "high"
-    relaxed = pace_level == "relaxed"
 
-    restaurants = []
-    attractions = []
+    start_date = date.fromisoformat(trip["start_date"])
+    end_date = date.fromisoformat(trip["end_date"])
+    trip_length = max(1, (end_date - start_date).days + 1)
+
+    restaurants: list[dict] = []
+    attractions: list[dict] = []
 
     try:
-        restaurants = simplify_places(
-            get_restaurant_recommendations(
-                city=destination_city,
-                country=destination_country,
-                notes=notes,
-            )
+        restaurants = get_restaurant_recommendations(
+            city=destination_city,
+            country=destination_country,
+            notes=notes,
+            dietary_prefs=dietary_prefs,
+            max_results=18,
         )
     except Exception:
         restaurants = []
 
     try:
-        attractions = simplify_places(
-            get_attraction_recommendations(
-                city=destination_city,
-                country=destination_country,
-                notes=notes,
-            )
+        attractions = get_attraction_recommendations(
+            city=destination_city,
+            country=destination_country,
+            notes=notes,
+            max_results=18,
         )
     except Exception:
         attractions = []
 
-    restaurant_food_weight = 2 if is_food_focused else 0
-    attraction_culture_weight = 1 if is_culture_focused else 0
-
-    restaurants = _rank_places(restaurants, food_weight=restaurant_food_weight)
-    attractions = _rank_places(attractions, culture_weight=attraction_culture_weight)
-
-    if authenticity >= 4:
-        restaurants = restaurants[:10]
-        attractions = attractions[:10]
+    restaurants = _unique_by_id(_rank_places(restaurants))
+    attractions = _unique_by_id(_rank_places(attractions))
 
     restaurant_clusters = _cluster_places_by_area(restaurants)
     attraction_clusters = _cluster_places_by_area(attractions)
@@ -313,68 +312,62 @@ def generate_itinerary(trip_id: str) -> dict:
     if not all_areas:
         all_areas = [selected_hotel["area"] if selected_hotel else "Central District"]
 
-    start_date = date.fromisoformat(trip["start_date"])
-    end_date = date.fromisoformat(trip["end_date"])
-    trip_length = max(1, (end_date - start_date).days + 1)
-
-    day_count = trip_length
-
-    if len(all_areas) < day_count:
-        while len(all_areas) < day_count:
-            all_areas.append(all_areas[-1])
-
     days = []
-    for idx in range(day_count):
-        area = all_areas[idx]
+    for i in range(trip_length):
+        area = all_areas[i % len(all_areas)]
+
         area_attractions = attraction_clusters.get(area, [])
         area_restaurants = restaurant_clusters.get(area, [])
-        restaurants_for_day = _pick_restaurants_for_day(area_restaurants, restaurants)
 
-        if idx == 0:
-            theme = "Arrival and gentle immersion"
-        elif idx == day_count - 1:
-            theme = f"Final day in {area}"
-        else:
-            theme = f"Explore {area}"
+        # fall back to rotated global results if local cluster is sparse
+        if len(area_attractions) < 3:
+            needed = 3 - len(area_attractions)
+            extra = _rotate_list(attractions, i, needed + 2)
+            area_attractions = _unique_by_id(area_attractions + extra)
 
-        day = _build_day(
-            day_number=idx + 1,
-            theme=theme,
-            neighborhood=area,
-            hotel=selected_hotel if idx == 0 else None,
-            attractions=area_attractions,
-            restaurants_for_day=restaurants_for_day,
-            balanced=is_balanced_discoverer,
-            food_focused=is_food_focused,
-            adventurous_food=adventurous_food,
-            walking_tolerance=walking_tolerance,
-            structure_preference=structure_preference,
+        if len(area_restaurants) < 3:
+            needed = 3 - len(area_restaurants)
+            extra = _rotate_list(restaurants, i, needed + 2)
+            area_restaurants = _unique_by_id(area_restaurants + extra)
+
+        day = _build_day_plan(
+            day_number=i + 1,
+            total_days=trip_length,
+            area=area,
+            hotel=selected_hotel if i == 0 else None,
+            attractions=area_attractions[:3],
+            restaurants=area_restaurants[:3],
+            pace_level=pace_level,
             day_start_preference=day_start_preference,
-            relaxed=relaxed,
+            has_food_focus=has_food_focus,
+            has_culture_focus=has_culture_focus,
         )
         days.append(day)
 
     summary_parts = [
-        f"A personalized itinerary for {destination_city}, {destination_country}."
+        f"A personalized itinerary for {destination_city}, {destination_country}.",
     ]
+
     if selected_hotel:
         summary_parts.append(
             f"Suggested hotel base: {selected_hotel['name']} in {selected_hotel['area']}."
         )
-    if is_food_focused:
-        summary_parts.append("Food experiences are weighted more heavily throughout the trip.")
-    if is_culture_focused:
-        summary_parts.append("Cultural and architectural stops are prioritized.")
-    if relaxed:
-        summary_parts.append("The schedule is intentionally lighter with more breathing room.")
-    elif pace_level == "packed":
-        summary_parts.append("The trip packs in more activity and variety each day.")
-    if walking_tolerance == "low":
-        summary_parts.append("Walking demands are kept lower and transitions are simplified.")
-    if structure_preference == "fully planned":
-        summary_parts.append("Each day is laid out in a more structured way.")
-    if authenticity >= 4:
-        summary_parts.append("Recommendations lean more local and less convenience-driven.")
+
+    if has_food_focus:
+        summary_parts.append(
+            "Food experiences are weighted more heavily throughout the trip."
+        )
+
+    if has_culture_focus:
+        summary_parts.append(
+            "Cultural and architectural stops are prioritized."
+        )
+
+    if dietary_prefs:
+        summary_parts.append(
+            f"Dining suggestions reflect these preferences: {', '.join(dietary_prefs)}."
+        )
+
     summary_parts.append(
         "Days are grouped by neighborhood to reduce backtracking and make the trip feel more natural."
     )
