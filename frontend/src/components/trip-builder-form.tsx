@@ -653,9 +653,11 @@ export default function TripBuilderForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-2xl bg-slate-950 py-3 text-white transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-50"
+            className="w-full rounded-2xl bg-slate-950 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? "Generating..." : "Generate Trip"}
+            <span className="text-white">
+              {loading ? "Generating..." : "Generate Trip"}
+            </span>
           </button>
         </form>
 

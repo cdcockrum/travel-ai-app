@@ -37,3 +37,10 @@ a {
 .card:hover {
   transform: translateY(-3px);
 }
+button {
+  color: inherit;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
