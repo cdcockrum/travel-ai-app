@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 type QuizAnswers = {
   pace_level: string;
@@ -44,6 +44,13 @@ const dietaryOptions = [
   "kosher",
 ];
 
+const accessibilityOptions = [
+  "wheelchair accessible",
+  "low walking",
+  "step-free routes",
+  "near transit",
+];
+
 const dealBreakerOptions = [
   "long transit times",
   "overpacked days",
@@ -60,6 +67,44 @@ const tripValueOptions = [
   "food quality",
   "cultural depth",
 ];
+
+function ToggleGroup({
+  title,
+  items,
+  selected,
+  onToggle,
+  activeClassName,
+}: {
+  title: string;
+  items: string[];
+  selected: string[];
+  onToggle: (item: string) => void;
+  activeClassName: string;
+}) {
+  return (
+    <div>
+      <p className="text-sm font-medium text-slate-800">{title}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {items.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onToggle(item)}
+            className={`rounded-full border px-4 py-2 text-sm transition ${
+              selected.includes(item)
+                ? `${activeClassName} text-white`
+                : "border-slate-300 bg-white text-slate-800"
+            }`}
+          >
+            <span className={selected.includes(item) ? "text-white" : ""}>
+              {item}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function QuizPage() {
   const router = useRouter();
@@ -127,7 +172,8 @@ export default function QuizPage() {
             Traveler Quiz
           </h1>
           <p className="mt-2 text-slate-600">
-            Save your travel style so the itinerary builder can personalize your trip.
+            Save your travel style so the itinerary builder can personalize your
+            trip more intelligently.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-8">
@@ -139,7 +185,7 @@ export default function QuizPage() {
                   onChange={(e) =>
                     setAnswers((prev) => ({ ...prev, pace_level: e.target.value }))
                   }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
                 >
                   <option value="relaxed">Relaxed</option>
                   <option value="balanced">Balanced</option>
@@ -152,14 +198,38 @@ export default function QuizPage() {
                 <select
                   value={answers.budget_level}
                   onChange={(e) =>
-                    setAnswers((prev) => ({ ...prev, budget_level: e.target.value }))
+                    setAnswers((prev) => ({
+                      ...prev,
+                      budget_level: e.target.value,
+                    }))
                   }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
                 >
                   <option value="budget">Budget</option>
                   <option value="moderate">Moderate</option>
                   <option value="premium">Premium</option>
                   <option value="luxury">Luxury</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Travel party
+                </label>
+                <select
+                  value={answers.travel_party}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      travel_party: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="solo">Solo</option>
+                  <option value="couple">Couple</option>
+                  <option value="family">Family</option>
+                  <option value="friends">Friends</option>
                 </select>
               </div>
 
@@ -175,7 +245,111 @@ export default function QuizPage() {
                       walking_tolerance: e.target.value,
                     }))
                   }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="low">Low</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Food adventure level
+                </label>
+                <select
+                  value={answers.food_adventure_level}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      food_adventure_level: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="low">Low</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Lodging preference
+                </label>
+                <select
+                  value={answers.lodging_preference}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      lodging_preference: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="boutique hotel">Boutique hotel</option>
+                  <option value="standard hotel">Standard hotel</option>
+                  <option value="luxury hotel">Luxury hotel</option>
+                  <option value="apartment">Apartment</option>
+                  <option value="hostel">Hostel</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Structure preference
+                </label>
+                <select
+                  value={answers.structure_preference}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      structure_preference: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="fully planned">Fully planned</option>
+                  <option value="some structure with flexibility">
+                    Some structure with flexibility
+                  </option>
+                  <option value="mostly spontaneous">Mostly spontaneous</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Transit confidence
+                </label>
+                <select
+                  value={answers.transit_confidence}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      transit_confidence: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                >
+                  <option value="not comfortable">Not comfortable</option>
+                  <option value="comfortable">Comfortable</option>
+                  <option value="very comfortable">Very comfortable</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-800">
+                  Crowd tolerance
+                </label>
+                <select
+                  value={answers.crowd_tolerance}
+                  onChange={(e) =>
+                    setAnswers((prev) => ({
+                      ...prev,
+                      crowd_tolerance: e.target.value,
+                    }))
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
                 >
                   <option value="low">Low</option>
                   <option value="moderate">Moderate</option>
@@ -195,140 +369,108 @@ export default function QuizPage() {
                       day_start_preference: e.target.value,
                     }))
                   }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
                 >
                   <option value="early">Early</option>
                   <option value="mid-morning">Mid-morning</option>
                   <option value="late">Late</option>
                 </select>
               </div>
-
-              <div>
-                <label className="text-sm font-medium text-slate-800">
-                  Crowd tolerance
-                </label>
-                <select
-                  value={answers.crowd_tolerance}
-                  onChange={(e) =>
-                    setAnswers((prev) => ({
-                      ...prev,
-                      crowd_tolerance: e.target.value,
-                    }))
-                  }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
-                >
-                  <option value="low">Low</option>
-                  <option value="moderate">Moderate</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-slate-800">
-                  Transit confidence
-                </label>
-                <select
-                  value={answers.transit_confidence}
-                  onChange={(e) =>
-                    setAnswers((prev) => ({
-                      ...prev,
-                      transit_confidence: e.target.value,
-                    }))
-                  }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3"
-                >
-                  <option value="not comfortable">Not comfortable</option>
-                  <option value="comfortable">Comfortable</option>
-                  <option value="very comfortable">Very comfortable</option>
-                </select>
-              </div>
             </div>
 
             <div>
-              <p className="text-sm font-medium text-slate-800">Top interests</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {interestOptions.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => toggleItem("top_interests", item)}
-                    className={`rounded-full border px-4 py-2 text-sm ${
-                      answers.top_interests.includes(item)
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-300 bg-white text-slate-800"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
+              <label className="text-sm font-medium text-slate-800">
+                Convenience vs authenticity
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                value={answers.convenience_vs_authenticity}
+                onChange={(e) =>
+                  setAnswers((prev) => ({
+                    ...prev,
+                    convenience_vs_authenticity: Number(e.target.value),
+                  }))
+                }
+                className="mt-3 w-full"
+              />
+              <p className="mt-2 text-sm text-slate-600">
+                {answers.convenience_vs_authenticity === 1
+                  ? "Strongly prefer convenience"
+                  : answers.convenience_vs_authenticity === 5
+                  ? "Strongly prefer authenticity"
+                  : "Balanced between convenience and authenticity"}
+              </p>
             </div>
 
-            <div>
-              <p className="text-sm font-medium text-slate-800">Dietary preferences</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {dietaryOptions.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => toggleItem("dietary_preferences", item)}
-                    className={`rounded-full border px-4 py-2 text-sm ${
-                      answers.dietary_preferences.includes(item)
-                        ? "border-indigo-700 bg-indigo-700 text-white"
-                        : "border-slate-300 bg-white text-slate-800"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ToggleGroup
+              title="Top interests"
+              items={interestOptions}
+              selected={answers.top_interests}
+              onToggle={(item) => toggleItem("top_interests", item)}
+              activeClassName="border-slate-900 bg-slate-900"
+            />
+
+            <ToggleGroup
+              title="Dietary preferences"
+              items={dietaryOptions}
+              selected={answers.dietary_preferences}
+              onToggle={(item) => toggleItem("dietary_preferences", item)}
+              activeClassName="border-indigo-700 bg-indigo-700"
+            />
+
+            <ToggleGroup
+              title="Accessibility needs"
+              items={accessibilityOptions}
+              selected={answers.accessibility_needs}
+              onToggle={(item) => toggleItem("accessibility_needs", item)}
+              activeClassName="border-emerald-700 bg-emerald-700"
+            />
+
+            <ToggleGroup
+              title="Deal breakers"
+              items={dealBreakerOptions}
+              selected={answers.deal_breakers}
+              onToggle={(item) => toggleItem("deal_breakers", item)}
+              activeClassName="border-rose-700 bg-rose-700"
+            />
+
+            <ToggleGroup
+              title="Trip values"
+              items={tripValueOptions}
+              selected={answers.trip_values}
+              onToggle={(item) => toggleItem("trip_values", item)}
+              activeClassName="border-amber-700 bg-amber-700"
+            />
 
             <div>
-              <p className="text-sm font-medium text-slate-800">Deal breakers</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {dealBreakerOptions.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => toggleItem("deal_breakers", item)}
-                    className={`rounded-full border px-4 py-2 text-sm ${
-                      answers.deal_breakers.includes(item)
-                        ? "border-rose-700 bg-rose-700 text-white"
-                        : "border-slate-300 bg-white text-slate-800"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-slate-800">Trip values</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {tripValueOptions.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => toggleItem("trip_values", item)}
-                    className={`rounded-full border px-4 py-2 text-sm ${
-                      answers.trip_values.includes(item)
-                        ? "border-emerald-700 bg-emerald-700 text-white"
-                        : "border-slate-300 bg-white text-slate-800"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
+              <label className="text-sm font-medium text-slate-800">
+                Meal style
+              </label>
+              <select
+                value={answers.meal_style}
+                onChange={(e) =>
+                  setAnswers((prev) => ({
+                    ...prev,
+                    meal_style: e.target.value,
+                  }))
+                }
+                className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+              >
+                <option value="mostly spontaneous">Mostly spontaneous</option>
+                <option value="mix of planned and spontaneous">
+                  Mix of planned and spontaneous
+                </option>
+                <option value="reservation-heavy">Reservation-heavy</option>
+              </select>
             </div>
 
             <button
               type="submit"
               className="w-full rounded-2xl bg-slate-950 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-slate-800"
             >
-              Save quiz and continue
+              <span className="text-white">Save quiz and continue</span>
             </button>
           </form>
         </div>
