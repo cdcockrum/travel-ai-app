@@ -31,6 +31,17 @@ def get_trip_recommendations(trip_id: str) -> dict:
         restaurants = simplify_places(
             get_restaurant_recommendations(city=city, country=country, notes=notes)
         )
+
+        raw_restaurants = get_restaurant_recommendations(
+            city=city,
+            country=country,
+            notes=notes
+        )
+
+        restaurants = simplify_places(
+            rank_places(raw_restaurants, dietary_prefs=trip.get("profile", {}).get("dietary_preferences"))
+        )
+        
     except Exception as exc:
         errors.append(f"Restaurants unavailable: {exc}")
 

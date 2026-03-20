@@ -44,3 +44,13 @@ app.include_router(weather.router, prefix="/api/weather", tags=["weather"])
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/intelligence/{city}")
+def intelligence(city: str) -> dict:
+    return {
+        "city": city,
+        "best_times": "Morning and late evening",
+        "crowds": "High in central districts midday",
+        "tip": "Explore side streets for better food options",
+    }

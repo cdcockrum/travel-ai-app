@@ -145,3 +145,31 @@ def get_attraction_recommendations(city: str, country: str, notes: str = "") -> 
         query = f"top tourist attractions and landmarks in {city}, {country}"
 
     return _post_text_search(query, included_type=None, page_size=10)
+
+def score_place(place: dict, dietary_prefs: list[str] | None = None) -> float:
+    rating = place.get("rating", 0) or 0
+    reviews = place.get("user_rating_count", 0) or 0
+    types = " ".join(place.get("types", [])).lower()
+
+    score = rating * 2 + min(reviews / 100, 5)
+
+    if dietary_prefs:
+        if "vegan" in dietary_prefs and "vegan" in types:
+            score += 3
+        if "vegetarian" in dietary_prefs and "vegetarian" in types:
+            score += 2
+        if "gluten" in dietary_prefs and "gluten" in types:
+            score += 1
+
+    if "restaurant" in types:
+        score += 1
+
+    return score
+
+
+def rank_places(places: list[dict], dietary_prefs=None):
+    return sorted(
+        places,
+        key=lambda p: score_place(p, dietary_prefs),
+        reverse=True,
+    )
