@@ -5,17 +5,18 @@ from typing import Any
 
 import requests
 
-GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 
 
 def _headers() -> dict[str, str]:
-    if not GOOGLE_PLACES_API_KEY:
+    google_places_api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+
+    if not google_places_api_key:
         raise RuntimeError("GOOGLE_PLACES_API_KEY is missing")
 
     return {
         "Content-Type": "application/json",
-        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-Api-Key": google_places_api_key,
         "X-Goog-FieldMask": ",".join(
             [
                 "places.id",
@@ -45,6 +46,13 @@ def _search_text(query: str, max_result_count: int = 10) -> list[dict[str, Any]]
         json=payload,
         timeout=20,
     )
+
+    print("\n===== GOOGLE PLACES DEBUG =====")
+    print("QUERY:", query)
+    print("STATUS:", response.status_code)
+    print("RESPONSE:", response.text[:800])
+    print("===== END GOOGLE PLACES DEBUG =====\n")
+
     response.raise_for_status()
 
     data = response.json()
@@ -182,16 +190,33 @@ def get_restaurant_recommendations(
     if "hidden gems" in notes_lower or "local" in notes_lower:
         queries.insert(0, f"local hidden gem restaurants in {city}, {country}")
 
+    print("\n===== RESTAURANT QUERY DEBUG =====")
+    print("CITY:", city)
+    print("COUNTRY:", country)
+    print("DIETARY PREFS:", dietary_prefs)
+    print("QUERIES:", queries[:5])
+    print("===== END RESTAURANT QUERY DEBUG =====\n")
+
     all_places: list[dict[str, Any]] = []
     for query in queries[:5]:
         try:
             results = _search_text(query, max_result_count=8)
-            all_places.extend(simplify_places(results))
-        except Exception:
+            simplified = simplify_places(results)
+            print(f"Restaurant query returned {len(simplified)} usable places: {query}")
+            all_places.extend(simplified)
+        except Exception as exc:
+            print(f"Restaurant query failed: {query}")
+            print("ERROR:", repr(exc))
             continue
 
     all_places = _dedupe_places(all_places)
     ranked = rank_places(all_places, dietary_prefs=dietary_prefs)
+
+    print("\n===== RESTAURANT RESULT DEBUG =====")
+    print("TOTAL UNIQUE RESTAURANTS:", len(all_places))
+    print("TOP RESTAURANTS:", [p.get("name") for p in ranked[:5]])
+    print("===== END RESTAURANT RESULT DEBUG =====\n")
+
     return ranked[:max_results]
 
 
@@ -215,12 +240,22 @@ def get_attraction_recommendations(
     if "nature" in notes_lower:
         queries.insert(0, f"best parks and gardens in {city}, {country}")
 
+    print("\n===== ATTRACTION QUERY DEBUG =====")
+    print("CITY:", city)
+    print("COUNTRY:", country)
+    print("QUERIES:", queries[:5])
+    print("===== END ATTRACTION QUERY DEBUG =====\n")
+
     all_places: list[dict[str, Any]] = []
     for query in queries[:5]:
         try:
             results = _search_text(query, max_result_count=8)
-            all_places.extend(simplify_places(results))
-        except Exception:
+            simplified = simplify_places(results)
+            print(f"Attraction query returned {len(simplified)} usable places: {query}")
+            all_places.extend(simplified)
+        except Exception as exc:
+            print(f"Attraction query failed: {query}")
+            print("ERROR:", repr(exc))
             continue
 
     all_places = _dedupe_places(all_places)
@@ -229,4 +264,10 @@ def get_attraction_recommendations(
         key=lambda p: ((p.get("rating") or 0), (p.get("user_rating_count") or 0)),
         reverse=True,
     )
+
+    print("\n===== ATTRACTION RESULT DEBUG =====")
+    print("TOTAL UNIQUE ATTRACTIONS:", len(all_places))
+    print("TOP ATTRACTIONS:", [p.get("name") for p in ranked[:5]])
+    print("===== END ATTRACTION RESULT DEBUG =====\n")
+
     return ranked[:max_results]
