@@ -1,6 +1,5 @@
-from typing import Any
+from typing import Any, Optional
 from pydantic import BaseModel, Field
-
 
 
 class QuizSubmission(BaseModel):
@@ -98,15 +97,6 @@ class ItineraryDay(BaseModel):
     notes: list[str] = []
 
 
-class TripRequest(BaseModel):
-    destination: str
-    start_date: str
-    end_date: str
-    notes: str | None = None
-    must_see: list[str] = []
-    traveler_profile: dict[str, Any] = {}
-    preferences: dict[str, Any] = {}
-
 
 class TripResponse(BaseModel):
     destination: str
@@ -118,5 +108,18 @@ class TripResponse(BaseModel):
     highlights: list[dict[str, Any]] = []
     map_points: list[MapPoint] = []
     itinerary: list[ItineraryDay] = []
+    tips: list[str] = []
+    places: list[dict[str, Any]] = []
+
+class TripGenerateResponse(BaseModel):
+    destination: str
+    summary: str
+    weather: Optional[dict[str, Any]] = None
+    neighborhoods: list[str] = []
+    restaurants: list[dict[str, Any]] = []
+    hotels: list[dict[str, Any]] = []
+    highlights: list[dict[str, Any]] = []
+    map_points: list[dict[str, Any]] = []
+    itinerary: list[dict[str, Any]] = []
     tips: list[str] = []
     places: list[dict[str, Any]] = []
