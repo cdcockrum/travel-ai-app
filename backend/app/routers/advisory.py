@@ -1,15 +1,16 @@
-from fastapi import APIRouter
+from __future__ import annotations
 
-from app.schemas import AdvisoryCreate
+from fastapi import APIRouter, HTTPException
+
+from app.services.advisory_service import build_alerts
 
 router = APIRouter()
 
 
-@router.post("")
-def create_advisory_request(payload: AdvisoryCreate) -> dict:
-    return {
-        "request_id": "demo-request-id",
-        "status": "new",
-        "service_type": payload.service_type,
-        "notes": payload.notes,
-    }
+@router.get("/{country_code}")
+def get_alerts(country_code: str) -> dict:
+    try:
+        alerts = build_alerts(country_code=country_code)
+        return {"country_code": country_code.upper(), "alerts": alerts}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

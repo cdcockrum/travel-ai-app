@@ -1,7 +1,6 @@
-from datetime import date
-from typing import Any, Optional
-
+from typing import Any
 from pydantic import BaseModel, Field
+
 
 
 class QuizSubmission(BaseModel):
@@ -25,6 +24,17 @@ class QuizSubmission(BaseModel):
     crowd_tolerance: str = "moderate"
     day_start_preference: str = "mid-morning"
 
+    nightlife_interest: str | None = None
+    shopping_interest: str | None = None
+    wellness_interest: str | None = None
+    photography_interest: str | None = None
+    weather_tolerance: str | None = None
+    social_energy: str | None = None
+    seat_of_pants_factor: str | None = None
+    neighborhood_style: list[str] = []
+    preferred_meal_times: list[str] = []
+    transport_preferences: list[str] = []
+
 
 class QuizResult(BaseModel):
     profile_id: str
@@ -33,30 +43,79 @@ class QuizResult(BaseModel):
     scores: dict[str, int]
 
 
-class TripCreate(BaseModel):
-    title: Optional[str] = None
-    destination_city: str
-    destination_country: str
-    start_date: date
-    end_date: date
-    budget_level: str
-    must_do_items: list[str] = []
-    avoid_items: list[str] = []
-    notes: Optional[str] = None
-    profile: Optional[dict[str, Any]] = None
+class TripRequest(BaseModel):
+    destination: str
+    start_date: str
+    end_date: str
+    notes: str | None = None
+    must_see: list[str] = []
+    traveler_profile: dict[str, Any] = {}
+    preferences: dict[str, Any] = {}
+
+
+class ItineraryDay(BaseModel):
+    day: int
+    title: str | None = None
+    morning: str | None = None
+    afternoon: str | None = None
+    evening: str | None = None
+    meals: list[str] = []
+    notes: list[str] = []
+
+
+class WeatherSummary(BaseModel):
+    description: str | None = None
+    temperature_c: float | None = None
+    feels_like_c: float | None = None
+    humidity: int | None = None
+
+
+class PlaceCard(BaseModel):
+    name: str
+    address: str | None = None
+    rating: float | None = None
+    types: list[str] = []
+    price_level: int | None = None
+    summary: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+
+
+class MapPoint(BaseModel):
+    name: str
+    category: str
+    lat: float
+    lng: float
+
+
+class ItineraryDay(BaseModel):
+    day: int
+    title: str | None = None
+    morning: str | None = None
+    afternoon: str | None = None
+    evening: str | None = None
+    meals: list[str] = []
+    notes: list[str] = []
+
+
+class TripRequest(BaseModel):
+    destination: str
+    start_date: str
+    end_date: str
+    notes: str | None = None
+    must_see: list[str] = []
+    traveler_profile: dict[str, Any] = {}
+    preferences: dict[str, Any] = {}
 
 
 class TripResponse(BaseModel):
-    trip_id: str
-    status: str
-    trip: dict
-
-
-class ItineraryGenerateRequest(BaseModel):
-    trip_id: str
-
-
-class AdvisoryCreate(BaseModel):
-    trip_id: str
-    service_type: str
-    notes: Optional[str] = None
+    destination: str
+    summary: str
+    weather: WeatherSummary | None = None
+    neighborhoods: list[str] = []
+    restaurants: list[PlaceCard] = []
+    hotels: list[PlaceCard] = []
+    highlights: list[PlaceCard] = []
+    map_points: list[MapPoint] = []
+    itinerary: list[ItineraryDay] = []
+    tips: list[str] = []

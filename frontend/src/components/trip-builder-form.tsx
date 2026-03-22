@@ -1,1115 +1,559 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import MapView from "./map-view";
+import TripResultsMap from "@/components/trip-results-map";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
-
-type ItineraryPlace = {
-  name: string;
-  address?: string;
-  lat?: number | null;
-  lng?: number | null;
-  category: string;
-  google_maps_url?: string | null;
-  why?: string;
-  best_for?: string;
+type Personality = {
+  profile_id?: string;
+  personality_label?: string;
+  summary?: string;
+  scores?: Record<string, number>;
 };
 
-type ItineraryDay = {
-  day_number: number;
-  theme: string;
-  neighborhood: string;
-  narrative?: string;
-  morning: string[];
-  breakfast?: string[];
-  lunch?: string[];
-  afternoon: string[];
-  dinner?: string[];
-  evening: string[];
-  places?: ItineraryPlace[];
-  practical_note: string;
-};
-
-type ItineraryResponse = {
-  trip_id?: string;
-  trip_summary: string;
-  score?: number;
-  strengths?: string[];
-  weaknesses?: string[];
-  improvements?: string[];
-  days: ItineraryDay[];
-};
-
-type StoredPersonality = {
-  profile_id: string;
-  personality_label: string;
-  summary: string;
-  scores: Record<string, number>;
-};
-
-type StoredQuizAnswers = {
-  pace_level: string;
-  budget_level: string;
-  travel_party: string;
-  walking_tolerance: string;
-  top_interests: string[];
-  food_adventure_level: string;
-  lodging_preference: string;
-  convenience_vs_authenticity: number;
-  structure_preference: string;
-  transit_confidence: string;
-  deal_breakers: string[];
-  meal_style: string;
-  trip_values: string[];
+type QuizAnswers = {
+  pace_level?: string;
+  budget_level?: string;
+  travel_party?: string;
+  walking_tolerance?: string;
+  top_interests?: string[];
+  food_adventure_level?: string;
+  lodging_preference?: string;
+  convenience_vs_authenticity?: number;
+  structure_preference?: string;
+  transit_confidence?: string;
+  deal_breakers?: string[];
+  meal_style?: string;
+  trip_values?: string[];
   dietary_preferences?: string[];
   allergies?: string[];
   accessibility_needs?: string[];
   crowd_tolerance?: string;
   day_start_preference?: string;
+  nightlife_interest?: string;
+  shopping_interest?: string;
+  wellness_interest?: string;
+  photography_interest?: string;
+  weather_tolerance?: string;
+  social_energy?: string;
+  seat_of_pants_factor?: string;
+  neighborhood_style?: string[];
+  preferred_meal_times?: string[];
+  transport_preferences?: string[];
 };
 
-type PlaceRecommendation = {
-  id: string;
+type DayPlan = {
+  day: number;
+  title?: string;
+  morning?: string;
+  afternoon?: string;
+  evening?: string;
+  meals?: string[];
+  notes?: string[];
+};
+
+type PlaceCard = {
   name: string;
   address?: string;
   rating?: number;
-  user_rating_count?: number;
-  primary_type?: string;
-  google_maps_url?: string;
-  website_url?: string;
   types?: string[];
+  price_level?: number;
+  summary?: string;
+  lat?: number;
+  lng?: number;
 };
 
-type HotelRecommendation = {
-  id: string;
+type WeatherSummary = {
+  description?: string;
+  temperature_c?: number;
+  feels_like_c?: number;
+  humidity?: number;
+};
+
+type MapPoint = {
   name: string;
-  area: string;
-  style: string;
-  price_band: string;
-  why: string;
+  category: string;
+  lat: number;
+  lng: number;
 };
 
-type RecommendationsResponse = {
-  trip_id: string;
-  destination_city: string;
-  destination_country: string;
-  restaurants: PlaceRecommendation[];
-  attractions: PlaceRecommendation[];
-  hotels: HotelRecommendation[];
-  errors?: string[];
+type TripResponse = {
+  destination?: string;
+  summary?: string;
+  weather?: WeatherSummary | null;
+  neighborhoods?: string[];
+  restaurants?: PlaceCard[];
+  hotels?: PlaceCard[];
+  highlights?: PlaceCard[];
+  map_points?: MapPoint[];
+  tips?: string[];
+  itinerary?: DayPlan[];
 };
 
-type WeatherDay = {
-  date: string;
-  avg_temp: number;
-  condition: string;
-};
-
-type WeatherResponse = {
-  city: string;
-  country: string;
-  forecast: WeatherDay[];
-};
-
-type IntelligenceResponse = {
-  city: string;
-  best_times: string;
-  crowds: string;
-  tip: string;
-};
-
-function SectionList({
-  title,
-  items,
-}: {
-  title: string;
-  items?: string[];
-}) {
-  if (!items || items.length === 0) return null;
-
-  return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        {title}
-      </p>
-      <ul className="mt-2 space-y-1.5 text-sm leading-6 text-slate-800">
-        {items.map((item) => (
-          <li key={item}>• {item}</li>
-        ))}
-      </ul>
-    </div>
-  );
+function priceLabel(priceLevel?: number) {
+  if (priceLevel === undefined || priceLevel === null) return null;
+  return "$".repeat(Math.max(1, Math.min(priceLevel, 4)));
 }
 
-function TagList({
+function PlaceSection({
   title,
   items,
-  tone = "slate",
 }: {
   title: string;
-  items?: string[];
-  tone?: "slate" | "emerald" | "indigo" | "rose" | "amber";
+  items?: PlaceCard[];
 }) {
-  if (!items || items.length === 0) return null;
-
-  const tones = {
-    slate: "border-slate-200 bg-slate-50 text-slate-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    indigo: "border-indigo-200 bg-indigo-50 text-indigo-800",
-    rose: "border-rose-200 bg-rose-50 text-rose-800",
-    amber: "border-amber-200 bg-amber-50 text-amber-800",
-  };
+  if (!items?.length) return null;
 
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        {title}
-      </p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {items.map((item) => (
-          <span
-            key={item}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}
+      <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {items.map((item, index) => (
+          <div
+            key={`${title}-${item.name}-${index}`}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
           >
-            {item}
-          </span>
+            <p className="font-semibold text-slate-900">{item.name}</p>
+
+            {item.address ? (
+              <p className="mt-1 text-sm text-slate-600">{item.address}</p>
+            ) : null}
+
+            <div className="mt-2 space-y-1 text-sm text-slate-700">
+              {item.rating ? <p>Rating: {item.rating}</p> : null}
+              {priceLabel(item.price_level) ? (
+                <p>Price: {priceLabel(item.price_level)}</p>
+              ) : null}
+              {item.types?.length ? (
+                <p>Types: {item.types.slice(0, 3).join(", ")}</p>
+              ) : null}
+              {item.summary ? <p>{item.summary}</p> : null}
+            </div>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function recommendationReason(
-  place: PlaceRecommendation,
-  dietaryPrefs: string[] = []
-) {
-  const types = (place.types || []).join(" ").toLowerCase();
-  const name = (place.name || "").toLowerCase();
-
-  if (
-    dietaryPrefs.includes("vegan") &&
-    (types.includes("vegan") || name.includes("vegan"))
-  ) {
-    return "Best for vegan-friendly dining";
-  }
-
-  if (
-    dietaryPrefs.includes("vegetarian") &&
-    (types.includes("vegetarian") ||
-      name.includes("vegetarian") ||
-      name.includes("veggie"))
-  ) {
-    return "Best for vegetarian-friendly dining";
-  }
-
-  if ((place.rating || 0) >= 4.6) {
-    return "Best for standout reviews";
-  }
-
-  if (types.includes("cafe")) {
-    return "Best for a lighter stop";
-  }
-
-  if (types.includes("museum")) {
-    return "Best for cultural depth";
-  }
-
-  if (types.includes("tourist_attraction")) {
-    return "Best for iconic sightseeing";
-  }
-
-  return "Best for neighborhood fit";
-}
-
 export default function TripBuilderForm() {
-  const [destinationCity, setDestinationCity] = useState("Tokyo");
-  const [destinationCountry, setDestinationCountry] = useState("Japan");
-  const [startDate, setStartDate] = useState("2026-04-10");
-  const [endDate, setEndDate] = useState("2026-04-15");
-  const [budgetLevel, setBudgetLevel] = useState("moderate");
-  const [mustDoItems, setMustDoItems] = useState("food tour, temple visit");
-  const [avoidItems, setAvoidItems] = useState("overpacked days");
-  const [notes, setNotes] = useState(
-    "First trip focused on food, culture, and walkable neighborhoods"
-  );
-  const [dietaryPrefs, setDietaryPrefs] = useState<string[]>([
-    "vegan",
-    "vegetarian",
-  ]);
-
+  const [destination, setDestination] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [travelNotes, setTravelNotes] = useState("");
+  const [mustSee, setMustSee] = useState("");
   const [loading, setLoading] = useState(false);
-  const [itinerary, setItinerary] = useState<ItineraryResponse | null>(null);
-  const [recommendations, setRecommendations] =
-    useState<RecommendationsResponse | null>(null);
-  const [weather, setWeather] = useState<WeatherResponse | null>(null);
-  const [intel, setIntel] = useState<IntelligenceResponse | null>(null);
-  const [personality, setPersonality] = useState<StoredPersonality | null>(null);
-  const [quizAnswers, setQuizAnswers] = useState<StoredQuizAnswers | null>(null);
+  const [result, setResult] = useState<TripResponse | null>(null);
+
+  const [quizAnswers, setQuizAnswers] = useState<QuizAnswers>({});
+  const [personality, setPersonality] = useState<Personality>({});
 
   useEffect(() => {
-    const saved = localStorage.getItem("last_trip");
-    if (saved) {
+    const savedQuiz = localStorage.getItem("quiz_answers");
+    const savedPersonality = localStorage.getItem("personality");
+
+    if (savedQuiz) {
       try {
-        setItinerary(JSON.parse(saved));
+        setQuizAnswers(JSON.parse(savedQuiz));
       } catch (error) {
-        console.error("Failed to parse saved trip", error);
+        console.error("Could not parse quiz_answers", error);
+      }
+    }
+
+    if (savedPersonality) {
+      try {
+        setPersonality(JSON.parse(savedPersonality));
+      } catch (error) {
+        console.error("Could not parse personality", error);
       }
     }
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
+  const travelerSnapshot = useMemo(() => {
+    const parts = [
+      personality.personality_label,
+      quizAnswers.budget_level,
+      quizAnswers.pace_level,
+      quizAnswers.day_start_preference,
+    ].filter(Boolean);
+
+    return parts.join(" • ");
+  }, [personality, quizAnswers]);
+
+  const tripLengthText = useMemo(() => {
+    if (!startDate || !endDate) return "";
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const ms = end.getTime() - start.getTime();
+    if (Number.isNaN(ms) || ms < 0) return "";
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }, [startDate, endDate]);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    if (!destination || !startDate || !endDate) {
+      alert("Please fill out destination, start date, and end date.");
+      return;
+    }
+
+    const payload = {
+      destination,
+      start_date: startDate,
+      end_date: endDate,
+      notes: travelNotes,
+      must_see: mustSee
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      traveler_profile: personality,
+      preferences: {
+        pace: quizAnswers.pace_level ?? null,
+        budget: quizAnswers.budget_level ?? null,
+        travel_party: quizAnswers.travel_party ?? null,
+        walking_tolerance: quizAnswers.walking_tolerance ?? null,
+        food_adventure_level: quizAnswers.food_adventure_level ?? null,
+        lodging_preference: quizAnswers.lodging_preference ?? null,
+        convenience_vs_authenticity:
+          quizAnswers.convenience_vs_authenticity ?? null,
+        structure_preference: quizAnswers.structure_preference ?? null,
+        transit_confidence: quizAnswers.transit_confidence ?? null,
+        deal_breakers: quizAnswers.deal_breakers ?? [],
+        meal_style: quizAnswers.meal_style ?? null,
+        trip_values: quizAnswers.trip_values ?? [],
+        dietary_preferences: quizAnswers.dietary_preferences ?? [],
+        allergies: quizAnswers.allergies ?? [],
+        accessibility_needs: quizAnswers.accessibility_needs ?? [],
+        crowd_tolerance: quizAnswers.crowd_tolerance ?? null,
+        day_start_preference: quizAnswers.day_start_preference ?? null,
+        nightlife_interest: quizAnswers.nightlife_interest ?? null,
+        shopping_interest: quizAnswers.shopping_interest ?? null,
+        wellness_interest: quizAnswers.wellness_interest ?? null,
+        photography_interest: quizAnswers.photography_interest ?? null,
+        weather_tolerance: quizAnswers.weather_tolerance ?? null,
+        social_energy: quizAnswers.social_energy ?? null,
+        seat_of_pants_factor: quizAnswers.seat_of_pants_factor ?? null,
+        neighborhood_style: quizAnswers.neighborhood_style ?? [],
+        preferred_meal_times: quizAnswers.preferred_meal_times ?? [],
+        transport_preferences: quizAnswers.transport_preferences ?? [],
+        top_interests: quizAnswers.top_interests ?? [],
+      },
+    };
+
     setLoading(true);
-    setItinerary(null);
-    setRecommendations(null);
-    setWeather(null);
-    setIntel(null);
+    setResult(null);
 
     try {
-      const storedPersonality = localStorage.getItem("personality");
-      const storedQuizAnswers = localStorage.getItem("quiz_answers");
-
-      const parsedPersonality: StoredPersonality | null = storedPersonality
-        ? JSON.parse(storedPersonality)
-        : null;
-
-      const parsedQuizAnswers: StoredQuizAnswers | null = storedQuizAnswers
-        ? JSON.parse(storedQuizAnswers)
-        : null;
-
-      const mergedQuizAnswers = parsedQuizAnswers
-        ? {
-            ...parsedQuizAnswers,
-            dietary_preferences: Array.from(
-              new Set([
-                ...(parsedQuizAnswers.dietary_preferences || []),
-                ...dietaryPrefs,
-              ])
-            ),
-          }
-        : {
-            dietary_preferences: dietaryPrefs,
-          };
-
-      setPersonality(parsedPersonality);
-      setQuizAnswers(mergedQuizAnswers as StoredQuizAnswers);
-
-      const mergedNotes = parsedPersonality
-        ? `Traveler personality: ${parsedPersonality.personality_label}. ${parsedPersonality.summary} Dietary preferences: ${dietaryPrefs.join(", ")}. Notes: ${notes}`
-        : `Dietary preferences: ${dietaryPrefs.join(", ")}. Notes: ${notes}`;
-
-      const tripResponse = await fetch(`${API_BASE}/api/trips`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title: `${destinationCity} Trip`,
-          destination_city: destinationCity,
-          destination_country: destinationCountry,
-          start_date: startDate,
-          end_date: endDate,
-          budget_level: budgetLevel,
-          must_do_items: mustDoItems
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean),
-          avoid_items: avoidItems
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean),
-          notes: mergedNotes,
-          profile: mergedQuizAnswers,
-        }),
-      });
-
-      if (!tripResponse.ok) {
-        throw new Error("Failed to create trip");
-      }
-
-      const tripData = await tripResponse.json();
-
-      const itineraryResponse = await fetch(`${API_BASE}/api/itinerary/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          trip_id: tripData.trip_id,
-        }),
-      });
-
-      if (!itineraryResponse.ok) {
-        throw new Error("Failed to generate itinerary");
-      }
-
-      const itineraryData: ItineraryResponse = await itineraryResponse.json();
-      setItinerary(itineraryData);
-      localStorage.setItem("last_trip", JSON.stringify(itineraryData));
-
-      const recResponse = await fetch(
-        `${API_BASE}/api/recommendations/${tripData.trip_id}`
+      const response = await fetch(
+        "http://127.0.0.1:8000/api/trips/generate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
       );
 
-      if (recResponse.ok) {
-        const recData: RecommendationsResponse = await recResponse.json();
-        setRecommendations(recData);
+      if (!response.ok) {
+        throw new Error("Failed to generate trip");
       }
 
-      const weatherResponse = await fetch(
-        `${API_BASE}/api/weather/${encodeURIComponent(
-          destinationCity
-        )}/${encodeURIComponent(destinationCountry)}`
-      );
-
-      if (weatherResponse.ok) {
-        const weatherData: WeatherResponse = await weatherResponse.json();
-        setWeather(weatherData);
-      }
-
-      const intelResponse = await fetch(
-        `${API_BASE}/intelligence/${encodeURIComponent(destinationCity)}`
-      );
-
-      if (intelResponse.ok) {
-        const intelData: IntelligenceResponse = await intelResponse.json();
-        setIntel(intelData);
-      }
+      const data = await response.json();
+      console.log("TRIP API RESPONSE:", data);
+      console.log("MAP POINTS:", data.map_points);
+      setResult(data);
     } catch (error) {
       console.error(error);
-      alert("Something went wrong generating the itinerary.");
+      alert("Something went wrong generating the trip.");
     } finally {
       setLoading(false);
     }
   }
 
-  const allPlaces = itinerary?.days.flatMap((day) => day.places || []) || [];
-
-  const featuredNeighborhood = useMemo(() => {
-    if (!itinerary?.days?.length) return null;
-
-    const counts = new Map<string, number>();
-    itinerary.days.forEach((day) => {
-      counts.set(day.neighborhood, (counts.get(day.neighborhood) || 0) + 1);
-    });
-
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-  }, [itinerary]);
-
-  const featuredRestaurant = useMemo(() => {
-    return recommendations?.restaurants?.[0] || null;
-  }, [recommendations]);
-
-  const travelTips = useMemo(() => {
-    const tips: string[] = [];
-
-    if (quizAnswers?.dietary_preferences?.includes("vegan")) {
-      tips.push(
-        "Keep a shortlist of vegan-friendly restaurants pinned before each day starts."
-      );
-    }
-    if (quizAnswers?.dietary_preferences?.includes("vegetarian")) {
-      tips.push(
-        "Small cafés and neighborhood restaurants may offer better vegetarian flexibility than larger chains."
-      );
-    }
-    if (quizAnswers?.allergies?.length) {
-      tips.push(
-        "Keep allergy needs written clearly so they are easy to show quickly when ordering."
-      );
-    }
-    if (quizAnswers?.walking_tolerance === "low") {
-      tips.push(
-        "Favor one strong neighborhood per day instead of crossing the city repeatedly."
-      );
-    }
-    if (quizAnswers?.crowd_tolerance === "low") {
-      tips.push(
-        "Aim for early or late windows when visiting high-profile attractions."
-      );
-    }
-    if (quizAnswers?.day_start_preference === "late") {
-      tips.push(
-        "Avoid locking in too many early reservations so mornings stay comfortable."
-      );
-    }
-    if (quizAnswers?.transit_confidence === "not comfortable") {
-      tips.push(
-        "Save map links in advance and prioritize simpler routes over faster but more complex ones."
-      );
-    }
-    if (
-      quizAnswers?.convenience_vs_authenticity &&
-      quizAnswers.convenience_vs_authenticity >= 4
-    ) {
-      tips.push(
-        "Allow extra time for neighborhood discoveries, since more local areas often move at a slower pace."
-      );
-    }
-    if (tips.length === 0) {
-      tips.push(
-        "Anchor each day to one neighborhood so the trip feels lighter and easier to navigate."
-      );
-      tips.push(
-        "Use one strong meal or reservation per day, then leave some room around it."
-      );
-    }
-
-    return tips.slice(0, 4);
-  }, [quizAnswers]);
-
-  const alerts = useMemo(() => {
-    const items: string[] = [];
-
-    if (quizAnswers?.allergies?.length) {
-      items.push(
-        "Meal safety alert: verify ingredients and prep details before ordering."
-      );
-    }
-    if (quizAnswers?.walking_tolerance === "low") {
-      items.push(
-        "Mobility alert: avoid stacking multiple long sightseeing blocks back-to-back."
-      );
-    }
-    if (quizAnswers?.crowd_tolerance === "low") {
-      items.push(
-        "Crowd alert: major sights may feel best outside midday peaks."
-      );
-    }
-    if (quizAnswers?.structure_preference === "fully planned") {
-      items.push(
-        "Planning alert: this trip benefits from a few fixed anchors each day."
-      );
-    }
-
-    return items.slice(0, 3);
-  }, [quizAnswers]);
-
   return (
-    <div className="mx-auto max-w-7xl space-y-8 p-6">
-      <div className="space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-slate-950">
-          AI Travel Intelligence Platform
+    <div className="space-y-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+          Build Your Trip
         </h1>
-        <p className="max-w-3xl text-slate-600">
-          Build smarter, more personal itineraries with neighborhood-aware
-          planning, stronger recommendations, and a more natural day-by-day
-          rhythm.
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Create a richer itinerary using your saved travel personality, food
+          preferences, comfort needs, and destination priorities.
         </p>
+
+        {travelerSnapshot ? (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Loaded traveler profile
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-900">
+              {travelerSnapshot}
+            </p>
+            {personality.summary ? (
+              <p className="mt-2 text-sm text-slate-600">{personality.summary}</p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid gap-8 xl:grid-cols-[1fr,1.2fr,0.8fr]">
-        <form
-          onSubmit={handleSubmit}
-          className="glass-card space-y-5 rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm"
-        >
-          <div>
-            <h2 className="text-2xl font-semibold text-slate-950">
-              Build a Trip
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              Enter real trip details and generate a personalized itinerary.
+      <form onSubmit={handleSubmit} className="grid gap-8">
+        <section className="grid gap-6">
+          <h2 className="text-lg font-semibold text-slate-900">Trip details</h2>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">
+                Destination
+              </label>
+              <input
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                placeholder="Tokyo"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+              />
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Start date
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  End date
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
+                />
+              </div>
+            </div>
+          </div>
+
+          {startDate && endDate && tripLengthText ? (
+            <p className="text-sm text-slate-500">
+              Trip length: {tripLengthText}
             </p>
-          </div>
+          ) : null}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Destination city
-            </label>
-            <input
-              value={destinationCity}
-              onChange={(e) => setDestinationCity(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Destination country
-            </label>
-            <input
-              value={destinationCountry}
-              onChange={(e) => setDestinationCountry(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500"
-            />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-6">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-800">
-                Start date
+              <label className="text-sm font-medium text-slate-700">
+                Must-see places or priorities
               </label>
               <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none focus:border-slate-500"
+                value={mustSee}
+                onChange={(e) => setMustSee(e.target.value)}
+                placeholder="TeamLab, vintage shopping, quiet cafés"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
               />
+              <p className="text-xs text-slate-500">
+                Separate multiple items with commas.
+              </p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-800">
-                End date
+              <label className="text-sm font-medium text-slate-700">
+                Extra notes
               </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none focus:border-slate-500"
+              <textarea
+                value={travelNotes}
+                onChange={(e) => setTravelNotes(e.target.value)}
+                rows={5}
+                placeholder="We want slower mornings, memorable food, easy transit, strong architecture, and low-crowd evenings."
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
               />
             </div>
           </div>
+        </section>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Budget level
-            </label>
-            <select
-              value={budgetLevel}
-              onChange={(e) => setBudgetLevel(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900"
-            >
-              <option value="budget">Budget</option>
-              <option value="moderate">Moderate</option>
-              <option value="premium">Premium</option>
-              <option value="luxury">Luxury</option>
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Dietary preferences
-            </label>
-            <div className="grid grid-cols-2 gap-2 text-sm text-slate-800">
-              {[
-                "vegan",
-                "vegetarian",
-                "gluten-free",
-                "dairy-free",
-                "halal",
-                "kosher",
-              ].map((option) => {
-                const checked = dietaryPrefs.includes(option);
-                return (
-                  <label
-                    key={option}
-                    className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setDietaryPrefs((prev) => [...prev, option]);
-                        } else {
-                          setDietaryPrefs((prev) =>
-                            prev.filter((item) => item !== option)
-                          );
-                        }
-                      }}
-                    />
-                    <span className="capitalize">{option}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Must-do items
-            </label>
-            <input
-              value={mustDoItems}
-              onChange={(e) => setMustDoItems(e.target.value)}
-              placeholder="food tour, architecture walk, museum"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">
-              Avoid items
-            </label>
-            <input
-              value={avoidItems}
-              onChange={(e) => setAvoidItems(e.target.value)}
-              placeholder="long transit, nightlife-heavy plans"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-800">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={4}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500"
-            />
-          </div>
-
+        <div className="flex flex-wrap gap-3">
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-2xl bg-black px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium !text-white transition hover:bg-slate-700 disabled:opacity-50"
           >
-            <span className="text-white">
-              {loading ? "Generating..." : "Generate Trip"}
-            </span>
+            {loading ? "Generating..." : "Generate Trip"}
           </button>
-        </form>
 
-        <div className="space-y-6">
-          {itinerary ? (
-            <>
-              <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-                <h2 className="text-xl font-semibold text-slate-950">Overview</h2>
-                <p className="mt-3 leading-7 text-slate-800">
-                  {itinerary.trip_summary}
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.removeItem("quiz_answers");
+              localStorage.removeItem("personality");
+              setQuizAnswers({});
+              setPersonality({});
+            }}
+            className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-medium !text-slate-900 transition hover:bg-slate-50"
+          >
+            Clear saved quiz
+          </button>
+        </div>
+      </form>
+
+      {result ? (
+        <div className="space-y-6 rounded-3xl border border-slate-200 bg-slate-50 p-6">
+          <div>
+            <h2 className="text-2xl font-semibold text-slate-950">
+              {result.destination || destination}
+            </h2>
+            {result.summary ? (
+              <p className="mt-2 text-slate-700">{result.summary}</p>
+            ) : null}
+          </div>
+
+          {result.weather ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-lg font-semibold text-slate-900">Weather</h3>
+              <p className="mt-2 text-slate-700">
+                {result.weather.description || "Current conditions unavailable"}
+                {result.weather.temperature_c !== undefined &&
+                result.weather.temperature_c !== null
+                  ? ` • ${result.weather.temperature_c}°C`
+                  : ""}
+              </p>
+              {(result.weather.feels_like_c !== undefined &&
+                result.weather.feels_like_c !== null) ||
+              (result.weather.humidity !== undefined &&
+                result.weather.humidity !== null) ? (
+                <p className="text-sm text-slate-600">
+                  {result.weather.feels_like_c !== undefined &&
+                  result.weather.feels_like_c !== null
+                    ? `Feels like ${result.weather.feels_like_c}°C`
+                    : ""}
+                  {result.weather.feels_like_c !== undefined &&
+                  result.weather.feels_like_c !== null &&
+                  result.weather.humidity !== undefined &&
+                  result.weather.humidity !== null
+                    ? " • "
+                    : ""}
+                  {result.weather.humidity !== undefined &&
+                  result.weather.humidity !== null
+                    ? `Humidity ${result.weather.humidity}%`
+                    : ""}
                 </p>
-              </div>
+              ) : null}
+            </div>
+          ) : null}
 
-              <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-                <h2 className="text-xl font-semibold text-slate-950">
-                  Travel Intelligence
-                </h2>
-
-                {featuredNeighborhood && (
-                  <p className="mt-3 text-sm text-slate-800">
-                    Featured neighborhood:{" "}
-                    <span className="font-semibold">{featuredNeighborhood}</span>
-                  </p>
-                )}
-
-                {featuredRestaurant && (
-                  <p className="mt-2 text-sm text-slate-800">
-                    Featured restaurant:{" "}
-                    <span className="font-semibold">{featuredRestaurant.name}</span>
-                  </p>
-                )}
-
-                {intel && (
-                  <div className="mt-4 space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold">Best times:</span>{" "}
-                      {intel.best_times}
-                    </p>
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold">Crowd insight:</span>{" "}
-                      {intel.crowds}
-                    </p>
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold">Tip:</span> {intel.tip}
-                    </p>
-                  </div>
-                )}
-
-                {weather?.forecast?.length ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {weather.forecast.map((day) => (
-                      <div
-                        key={day.date}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                      >
-                        <p className="text-sm font-semibold text-slate-900">
-                          {day.date}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-700">
-                          {day.condition}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-700">
-                          Avg temp: {day.avg_temp}°C
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-600">
-                    Weather preview unavailable right now.
-                  </p>
-                )}
-
-                <div className="mt-5 space-y-4">
-                  <TagList title="Travel tips" items={travelTips} tone="indigo" />
-                  <TagList title="Alerts" items={alerts} tone="rose" />
-                </div>
-              </div>
-
-              <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-4 shadow-sm">
-                <h2 className="mb-4 text-xl font-semibold text-slate-950">Map</h2>
-                <MapView places={allPlaces} />
-              </div>
-
-              <div className="grid gap-6 md:grid-cols-2">
-                {itinerary.days.map((day) => (
-                  <div
-                    key={day.day_number}
-                    className="glass-card rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
+          {result.neighborhoods?.length ? (
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">
+                Suggested neighborhoods
+              </h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {result.neighborhoods.map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm text-slate-900"
                   >
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      Day {day.day_number}
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {result.map_points?.length ? (
+            <TripResultsMap points={result.map_points} />
+          ) : null}
+
+          <PlaceSection title="Highlights" items={result.highlights} />
+          <PlaceSection title="Restaurant ideas" items={result.restaurants} />
+          <PlaceSection title="Hotel ideas" items={result.hotels} />
+
+          {result.itinerary?.length ? (
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">
+                Day-by-day itinerary
+              </h3>
+              <div className="mt-4 space-y-4">
+                {result.itinerary.map((day) => (
+                  <div
+                    key={day.day}
+                    className="rounded-2xl border border-slate-200 bg-white p-4"
+                  >
+                    <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                      Day {day.day}
                     </p>
-                    <h3 className="mt-2 text-xl font-semibold text-slate-950">
-                      {day.theme}
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-600">{day.neighborhood}</p>
 
-                    {day.narrative && (
-                      <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-                        {day.narrative}
-                      </p>
-                    )}
+                    {day.title ? (
+                      <h4 className="mt-1 text-lg font-semibold text-slate-950">
+                        {day.title}
+                      </h4>
+                    ) : null}
 
-                    <div className="mt-4 space-y-4">
-                      <SectionList title="Morning" items={day.morning} />
-                      <SectionList title="Breakfast" items={day.breakfast} />
-                      <SectionList title="Lunch" items={day.lunch} />
-                      <SectionList title="Afternoon" items={day.afternoon} />
-                      <SectionList title="Dinner" items={day.dinner} />
-                      <SectionList title="Evening" items={day.evening} />
+                    <div className="mt-3 space-y-2 text-sm text-slate-700">
+                      {day.morning ? (
+                        <p>
+                          <span className="font-medium text-slate-900">Morning:</span>{" "}
+                          {day.morning}
+                        </p>
+                      ) : null}
+                      {day.afternoon ? (
+                        <p>
+                          <span className="font-medium text-slate-900">Afternoon:</span>{" "}
+                          {day.afternoon}
+                        </p>
+                      ) : null}
+                      {day.evening ? (
+                        <p>
+                          <span className="font-medium text-slate-900">Evening:</span>{" "}
+                          {day.evening}
+                        </p>
+                      ) : null}
                     </div>
 
-                    {day.places && day.places.length > 0 && (
-                      <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          Selected stops
-                        </p>
-
-                        <div className="mt-3 space-y-3">
-                          {day.places.map((place) => (
-                            <div
-                              key={`${day.day_number}-${place.name}-${place.category}`}
-                              className="rounded-xl border border-slate-200 bg-white p-3"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="font-medium text-slate-900">
-                                    {place.name}
-                                  </p>
-                                  <p className="mt-1 text-xs text-slate-500">
-                                    {place.category}
-                                  </p>
-                                </div>
-
-                                {place.best_for && (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800">
-                                    {place.best_for}
-                                  </span>
-                                )}
-                              </div>
-
-                              {place.why && (
-                                <p className="mt-2 text-sm leading-6 text-slate-700">
-                                  {place.why}
-                                </p>
-                              )}
-
-                              {place.google_maps_url && (
-                                <a
-                                  href={place.google_maps_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="mt-2 inline-block text-sm text-blue-700 underline"
-                                >
-                                  Open in Maps
-                                </a>
-                              )}
-                            </div>
+                    {day.meals?.length ? (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium text-slate-900">Meals</p>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                          {day.meals.map((meal, index) => (
+                            <li key={`${meal}-${index}`}>{meal}</li>
                           ))}
-                        </div>
+                        </ul>
                       </div>
-                    )}
+                    ) : null}
 
-                    <p className="mt-4 text-sm italic leading-6 text-slate-600">
-                      {day.practical_note}
-                    </p>
+                    {day.notes?.length ? (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium text-slate-900">Notes</p>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                          {day.notes.map((note, index) => (
+                            <li key={`${note}-${index}`}>{note}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
-
-              {recommendations?.errors && recommendations.errors.length > 0 && (
-                <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  {recommendations.errors.map((error) => (
-                    <p key={error}>{error}</p>
-                  ))}
-                </div>
-              )}
-
-              {recommendations?.hotels && (
-                <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-                  <h2 className="text-xl font-semibold text-slate-950">
-                    Suggested Hotels
-                  </h2>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    {recommendations.hotels.map((hotel) => (
-                      <div
-                        key={hotel.id}
-                        className="rounded-2xl border border-slate-200 bg-white p-4"
-                      >
-                        <p className="font-semibold text-slate-950">{hotel.name}</p>
-                        <p className="mt-1 text-sm text-slate-600">{hotel.area}</p>
-                        <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">
-                          {hotel.style} • {hotel.price_band}
-                        </p>
-                        <p className="mt-3 text-sm leading-6 text-slate-800">
-                          {hotel.why}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {recommendations && (
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-                    <h2 className="text-xl font-semibold text-slate-950">
-                      Restaurants
-                    </h2>
-                    {recommendations.restaurants.length === 0 ? (
-                      <p className="mt-3 text-sm text-slate-700">
-                        No restaurant recommendations found yet.
-                      </p>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                        {recommendations.restaurants.map((place) => (
-                          <div
-                            key={place.id}
-                            className="rounded-2xl border border-slate-200 bg-white p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-semibold text-slate-950">
-                                  {place.name}
-                                </p>
-                                <p className="mt-2 text-sm text-slate-600">
-                                  {recommendationReason(
-                                    place,
-                                    quizAnswers?.dietary_preferences ||
-                                      dietaryPrefs
-                                  )}
-                                </p>
-                              </div>
-
-                              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-800">
-                                {recommendationReason(
-                                  place,
-                                  quizAnswers?.dietary_preferences ||
-                                    dietaryPrefs
-                                )}
-                              </span>
-                            </div>
-
-                            {place.address && (
-                              <p className="mt-3 text-sm text-slate-600">
-                                {place.address}
-                              </p>
-                            )}
-                            {place.rating && (
-                              <p className="mt-3 text-sm text-slate-800">
-                                ⭐ {place.rating}
-                                {place.user_rating_count
-                                  ? ` (${place.user_rating_count} reviews)`
-                                  : ""}
-                              </p>
-                            )}
-                            {place.google_maps_url && (
-                              <a
-                                href={place.google_maps_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-3 inline-block text-sm text-blue-700 underline"
-                              >
-                                View on Maps
-                              </a>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-                    <h2 className="text-xl font-semibold text-slate-950">
-                      Attractions
-                    </h2>
-                    {recommendations.attractions.length === 0 ? (
-                      <p className="mt-3 text-sm text-slate-700">
-                        No attraction recommendations found yet.
-                      </p>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                        {recommendations.attractions.map((place) => (
-                          <div
-                            key={place.id}
-                            className="rounded-2xl border border-slate-200 bg-white p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-semibold text-slate-950">
-                                  {place.name}
-                                </p>
-                                <p className="mt-2 text-sm text-slate-600">
-                                  {recommendationReason(place)}
-                                </p>
-                              </div>
-
-                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-800">
-                                {recommendationReason(place)}
-                              </span>
-                            </div>
-
-                            {place.address && (
-                              <p className="mt-3 text-sm text-slate-600">
-                                {place.address}
-                              </p>
-                            )}
-                            {place.rating && (
-                              <p className="mt-3 text-sm text-slate-800">
-                                ⭐ {place.rating}
-                                {place.user_rating_count
-                                  ? ` (${place.user_rating_count} reviews)`
-                                  : ""}
-                              </p>
-                            )}
-                            {place.google_maps_url && (
-                              <a
-                                href={place.google_maps_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-3 inline-block text-sm text-blue-700 underline"
-                              >
-                                View on Maps
-                              </a>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-950">
-                Trip Output
-              </h2>
-              <p className="mt-2 text-slate-700">
-                Your itinerary, map, hotels, recommendations, and travel
-                intelligence will appear here.
-              </p>
             </div>
-          )}
+          ) : null}
+
+          {result.tips?.length ? (
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Tips</h3>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-700">
+                {result.tips.map((tip, index) => (
+                  <li key={`${tip}-${index}`}>{tip}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
-
-        <div className="space-y-6">
-          <div className="glass-card rounded-3xl border border-slate-200 bg-white/85 p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-950">
-              Profile Driving This Trip
-            </h2>
-
-            {personality || quizAnswers ? (
-              <div className="mt-4 space-y-5">
-                {personality && (
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {personality.personality_label}
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-slate-700">
-                      {personality.summary}
-                    </p>
-                  </div>
-                )}
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Pace
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.pace_level || "Not set"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Walking
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.walking_tolerance || "Not set"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Structure
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.structure_preference || "Not set"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Day start
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.day_start_preference || "Not set"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Crowd tolerance
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.crowd_tolerance || "Not set"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      Transit confidence
-                    </p>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {quizAnswers?.transit_confidence || "Not set"}
-                    </p>
-                  </div>
-                </div>
-
-                <TagList
-                  title="Top interests"
-                  items={quizAnswers?.top_interests}
-                  tone="emerald"
-                />
-                <TagList
-                  title="Dietary preferences"
-                  items={quizAnswers?.dietary_preferences}
-                  tone="indigo"
-                />
-                <TagList
-                  title="Accessibility needs"
-                  items={quizAnswers?.accessibility_needs}
-                  tone="rose"
-                />
-                <TagList
-                  title="Deal breakers"
-                  items={quizAnswers?.deal_breakers}
-                  tone="amber"
-                />
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-slate-700">
-                No saved quiz profile found yet. You can still build a trip
-                manually.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
+      ) : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import TripBuilderForm from "@/components/trip-builder-form";
 
 export default function TripBuilderPage() {
   return (
-    <main className="min-h-screen px-4 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-16">
       <TripBuilderForm />
     </main>
   );
