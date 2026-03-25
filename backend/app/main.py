@@ -1,34 +1,23 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers.profile import router as profile_router
-#from app.routers.itinerary import router as itinerary_router
-from app.routers.advisory import router as advisory_router
-from app.routers.itinerary import router as itinerary_router
 
+from app.routers.trips import router as trips_router
+from app.routers.itinerary import router as itinerary_router  # ❌ problematic
 
-app = FastAPI(title="Travel AI App API")
+app = FastAPI(title="Travel AI App")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.1.165:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
-app.include_router(itinerary_router, prefix="/api/trips", tags=["trips"])
-app.include_router(advisory_router, prefix="/api/advisory", tags=["advisory"])
-#app.include_router(itinerary_router, prefix="/api/itinerary", tags=["itinerary"])
+app.include_router(trips_router, prefix="/api/trips", tags=["trips"])
+app.include_router(itinerary_router, prefix="/api/itinerary", tags=["itinerary"])  # ❌ problematic
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
+
+@app.get("/")
+def root():
+    return {"message": "Travel AI backend is running"}
