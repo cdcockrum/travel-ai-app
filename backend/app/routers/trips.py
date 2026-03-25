@@ -14,14 +14,32 @@ from app.services.weather import get_weather_for_destination
 router = APIRouter()
 
 ATTRACTIONS_PER_DAY = 4
-DEFAULT_RESTAURANT_LIMIT = 35
-DEFAULT_HIGHLIGHT_LIMIT = 50
-DEFAULT_HOTEL_LIMIT = 8
-DEFAULT_NEIGHBORHOOD_LIMIT = 12
+DEFAULT_RESTAURANT_LIMIT = 40
+DEFAULT_HIGHLIGHT_LIMIT = 60
+DEFAULT_HOTEL_LIMIT = 10
+DEFAULT_NEIGHBORHOOD_LIMIT = 15
 
 
 # -----------------------------
-# Helpers: robust payload handling
+# Safe wrappers
+# -----------------------------
+def safe_search_places(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    try:
+        results = search_places(query, limit=limit) or []
+        return [r for r in results if isinstance(r, dict)]
+    except Exception:
+        return []
+
+
+def safe_get_weather(destination: str) -> dict[str, Any] | None:
+    try:
+        return get_weather_for_destination(destination)
+    except Exception:
+        return None
+
+
+# -----------------------------
+# Payload helpers
 # -----------------------------
 def _ensure_trip_request(payload: Any) -> TripRequest:
     if isinstance(payload, TripRequest):
@@ -52,29 +70,168 @@ def _interests_from_payload(payload: TripRequest) -> list[str]:
 
 
 # -----------------------------
-# Safe wrappers
+# Places normalization
 # -----------------------------
-def safe_search_places(query: str, limit: int = 8) -> list[dict[str, Any]]:
-    try:
-        return search_places(query, limit=limit) or []
-    except Exception:
-        return []
+def _is_resource_name(value: str) -> bool:
+    v = (value or "").strip()
+    return v.startswith("places/") or v.startswith("ChIJ")
 
 
-def safe_get_weather(destination: str) -> dict[str, Any] | None:
+def _place_name(place: dict[str, Any] | None) -> str | None:
+    if not place:
+        return None
+
+    # Places API v1
+    dn = place.get("displayName")
+    if isinstance(dn, dict):
+        t = dn.get("text")
+        if isinstance(t, str) and t.strip():
+            return t.strip()
+    if isinstance(dn, str) and dn.strip():
+        return dn.strip()
+
+    # Older output (but ignore resource ids)
+    v = place.get("name")
+    if isinstance(v, str) and v.strip() and not _is_resource_name(v):
+        return v.strip()
+
+    # fallback
+    t2 = place.get("title")
+    if isinstance(t2, str) and t2.strip():
+        return t2.strip()
+
+    return None
+
+
+def _place_address(place: dict[str, Any] | None) -> str | None:
+    if not place:
+        return None
+    for k in ("address", "formatted_address", "formattedAddress"):
+        v = place.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _place_rating(place: dict[str, Any] | None) -> float | None:
+    if not place:
+        return None
+    v = place.get("rating")
     try:
-        return get_weather_for_destination(destination)
+        return float(v) if v is not None else None
     except Exception:
         return None
+
+
+def _place_user_rating_count(place: dict[str, Any] | None) -> int | None:
+    if not place:
+        return None
+    v = (
+        place.get("user_ratings_total")
+        or place.get("user_rating_count")
+        or place.get("userRatingCount")
+    )
+    try:
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _place_lat(place: dict[str, Any] | None) -> float | None:
+    if not place:
+        return None
+    v = (
+        place.get("lat")
+        or place.get("latitude")
+        or (place.get("geometry") or {}).get("location", {}).get("lat")
+        or (place.get("location") or {}).get("latitude")
+    )
+    try:
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _place_lng(place: dict[str, Any] | None) -> float | None:
+    if not place:
+        return None
+    v = (
+        place.get("lng")
+        or place.get("longitude")
+        or (place.get("geometry") or {}).get("location", {}).get("lng")
+        or (place.get("location") or {}).get("longitude")
+    )
+    try:
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _place_maps_url(place: dict[str, Any] | None) -> str | None:
+    if not place:
+        return None
+    for k in ("google_maps_url", "url", "googleMapsUri"):
+        v = place.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _place_types(place: dict[str, Any] | None) -> list[str]:
+    if not place:
+        return []
+    raw = place.get("types") or place.get("place_types") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    if isinstance(raw, list):
+        return [str(t) for t in raw if str(t)]
+    return []
+
+
+def _normalize_place(place: dict[str, Any]) -> dict[str, Any]:
+    # keep raw first, then overwrite with normalized keys
+    out = dict(place)
+    out["name"] = _place_name(place)
+    out["address"] = _place_address(place)
+    out["rating"] = _place_rating(place)
+    out["user_rating_count"] = _place_user_rating_count(place)
+    out["types"] = _place_types(place)
+    out["lat"] = _place_lat(place)
+    out["lng"] = _place_lng(place)
+    out["google_maps_url"] = _place_maps_url(place)
+    return out
+
+
+def _has_real_name(place: dict[str, Any] | None) -> bool:
+    return bool(_place_name(place))
+
+
+def _dedupe_by_name(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for it in items:
+        nm = _place_name(it)
+        if not nm:
+            continue
+        key = nm.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out
+
+
+def _first_named(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for it in items:
+        if _has_real_name(it):
+            return it
+    return None
 
 
 # -----------------------------
 # Query builder + fallbacks
 # -----------------------------
 def build_place_queries(payload: TripRequest | dict[str, Any]) -> dict[str, str]:
-    """
-    Works for both TripRequest and dict payloads.
-    """
     if isinstance(payload, TripRequest):
         destination = payload.destination.strip()
         notes = (payload.notes or "").strip()
@@ -97,100 +254,98 @@ def build_place_queries(payload: TripRequest | dict[str, Any]) -> dict[str, str]
         "restaurants": f"best restaurants{diet_hint} in {destination} {notes}".strip(),
         "hotels": f"best hotels in {destination} {notes}".strip(),
         "highlights": f"top attractions things to do in {destination} {interest_hint} {notes}{must_see_hint}".strip(),
-        "neighborhoods": f"best neighborhoods to explore in {destination} {notes}".strip(),
+        # make the neighborhood query more explicit
+        "neighborhoods": f"best neighborhoods in {destination} (Loop River North West Loop Lincoln Park Wicker Park Old Town Chinatown)".strip(),
     }
 
 
 def build_restaurants_fallback(destination: str) -> list[dict[str, Any]]:
-    return [{"name": f"Popular local restaurant in {destination}"}]
+    return [{"name": f"Top restaurant in {destination}", "address": None, "rating": None}]
 
 
 def build_hotels_fallback(destination: str) -> list[dict[str, Any]]:
-    return [{"name": f"Well-rated hotel in {destination}"}]
+    return [{"name": f"Top hotel in {destination}", "address": None, "rating": None}]
 
 
 def build_highlights_fallback(destination: str) -> list[dict[str, Any]]:
-    return [{"name": f"Top attraction in {destination}"}]
+    return [{"name": f"Top attraction in {destination}", "address": None, "rating": None}]
 
 
 def build_neighborhoods_fallback() -> list[str]:
-    return ["Central"]
+    return ["Downtown", "River North", "West Loop", "Lincoln Park"]
 
 
 # -----------------------------
-# Place field extraction
+# Text helpers
 # -----------------------------
-def _place_address(place: dict[str, Any] | None) -> str | None:
-    if not place:
-        return None
-    return place.get("address") or place.get("formatted_address")
-
-
-def _place_lat(place: dict[str, Any] | None) -> float | None:
-    if not place:
-        return None
-    v = (
-        place.get("lat")
-        or place.get("latitude")
-        or (place.get("geometry") or {}).get("location", {}).get("lat")
-    )
-    try:
-        return float(v) if v is not None else None
-    except Exception:
-        return None
-
-
-def _place_lng(place: dict[str, Any] | None) -> float | None:
-    if not place:
-        return None
-    v = (
-        place.get("lng")
-        or place.get("longitude")
-        or (place.get("geometry") or {}).get("location", {}).get("lng")
-    )
-    try:
-        return float(v) if v is not None else None
-    except Exception:
-        return None
-
-
-def _place_maps_url(place: dict[str, Any] | None) -> str | None:
-    if not place:
-        return None
-    return place.get("google_maps_url") or place.get("url")
-
-
-def _place_types(place: dict[str, Any] | None) -> set[str]:
-    if not place:
-        return set()
-    raw = place.get("types") or place.get("place_types") or []
-    if isinstance(raw, str):
-        raw = [raw]
-    return {str(t).lower() for t in raw if t}
-
-
 def _place_text(place: dict[str, Any] | None) -> str:
     if not place:
         return ""
     parts = [
-        str(place.get("name") or ""),
-        str(place.get("summary") or ""),
+        str(_place_name(place) or ""),
         str(_place_address(place) or ""),
-        " ".join(sorted(_place_types(place))),
+        " ".join(_place_types(place)),
     ]
     return " ".join(p for p in parts if p).lower()
 
 
 def _place_line(place: dict[str, Any] | None) -> str:
+    # If this ever returns "a local spot", dinner/lunch/breakfast was None.
     if not place:
         return "a local spot"
-    name = place.get("name") or "a local spot"
+    nm = _place_name(place) or "a local spot"
     addr = _place_address(place)
-    return f"{name} — {addr}" if addr else name
+    return f"{nm} — {addr}" if addr else nm
 
 
 # -----------------------------
-# Dietary scoring + filtering
+# Neighborhood filtering (prevents CULTURE etc.)
+# -----------------------------
+_INVALID_NEIGHBORHOOD_WORDS = {
+    "culture",
+    "food",
+    "restaurant",
+    "restaurants",
+    "attraction",
+    "attractions",
+    "establishment",
+    "point of interest",
+}
+
+_NEIGHBORHOOD_HINTS = (
+    "loop",
+    "park",
+    "district",
+    "side",
+    "square",
+    "heights",
+    "village",
+    "town",
+    "river",
+    "mile",
+    "beach",
+    "chinatown",
+    "downtown",
+    "uptown",
+    "old town",
+    "west",
+    "east",
+    "north",
+    "south",
+)
+
+def _is_neighborhood_like(name: str) -> bool:
+    n = (name or "").strip()
+    if not n:
+        return False
+    nl = n.lower()
+    if nl in _INVALID_NEIGHBORHOOD_WORDS:
+        return False
+    return any(h in nl for h in _NEIGHBORHOOD_HINTS)
+
+
+# -----------------------------
+# Scoring
 # -----------------------------
 DIET_KEYWORDS: dict[str, list[str]] = {
     "vegan": ["vegan", "plant-based", "plant based"],
@@ -199,34 +354,21 @@ DIET_KEYWORDS: dict[str, list[str]] = {
     "dairy-free": ["dairy-free", "dairy free", "lactose-free", "lactose free"],
     "halal": ["halal"],
     "kosher": ["kosher"],
-    "pescatarian": ["pescatarian"],
 }
 
 VEGAN_AVOID_KEYWORDS = [
     "steak", "steakhouse", "bbq", "barbecue", "smokehouse",
-    "butcher", "meat", "ribs", "rib", "burger", "wings",
+    "butcher", "meat", "ribs", "burger", "wings",
     "seafood", "fish", "oyster", "lobster", "crab", "shrimp",
     "chicken", "bacon", "sausage",
 ]
 
 
-def _rating(place: dict[str, Any]) -> float:
-    try:
-        return float(place.get("rating") or 0.0)
-    except Exception:
-        return 0.0
-
-
-def _reviews(place: dict[str, Any]) -> float:
-    v = place.get("user_ratings_total") or place.get("user_rating_count") or 0
-    try:
-        return float(v)
-    except Exception:
-        return 0.0
-
-
 def restaurant_score(place: dict[str, Any], dietary_prefs: list[str]) -> float:
-    score = _rating(place) * 2.0 + min(math.log1p(_reviews(place)), 10.0)
+    rating = _place_rating(place) or 0.0
+    reviews = float(_place_user_rating_count(place) or 0)
+    score = rating * 2.0 + min(math.log1p(reviews), 10.0)
+
     txt = _place_text(place)
 
     for pref in dietary_prefs:
@@ -246,28 +388,13 @@ def restaurant_score(place: dict[str, Any], dietary_prefs: list[str]) -> float:
 
 
 def attraction_score(place: dict[str, Any]) -> float:
-    return _rating(place) * 2.0 + min(math.log1p(_reviews(place)), 10.0)
-
-
-def filter_restaurants_for_diet(restaurants: list[dict[str, Any]], dietary_prefs: list[str]) -> list[dict[str, Any]]:
-    if "vegan" not in dietary_prefs:
-        return restaurants
-
-    filtered: list[dict[str, Any]] = []
-    for r in restaurants:
-        txt = _place_text(r)
-        has_vegan = any(k in txt for k in DIET_KEYWORDS["vegan"])
-        looks_meaty = any(k in txt for k in VEGAN_AVOID_KEYWORDS)
-        if looks_meaty and not has_vegan:
-            continue
-        filtered.append(r)
-
-    return filtered if len(filtered) >= max(8, len(restaurants) // 3) else restaurants
+    rating = _place_rating(place) or 0.0
+    reviews = float(_place_user_rating_count(place) or 0)
+    return rating * 2.0 + min(math.log1p(reviews), 10.0)
 
 
 def rank_restaurants(restaurants: list[dict[str, Any]], dietary_prefs: list[str]) -> list[dict[str, Any]]:
-    r2 = filter_restaurants_for_diet(restaurants, dietary_prefs)
-    return sorted(r2, key=lambda p: restaurant_score(p, dietary_prefs), reverse=True)
+    return sorted(restaurants, key=lambda p: restaurant_score(p, dietary_prefs), reverse=True)
 
 
 def rank_attractions(highlights: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -275,7 +402,7 @@ def rank_attractions(highlights: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # -----------------------------
-# Geo clustering helpers
+# Geo helpers + clustering
 # -----------------------------
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     r = 6371000.0
@@ -366,7 +493,6 @@ def cluster_places_by_day(highlights: list[dict[str, Any]], days: int) -> list[l
         clusters[a].append(h)
 
     clusters = [rank_attractions(c) for c in clusters]
-
     day_clusters: list[list[dict[str, Any]]] = [[] for _ in range(days)]
     for d in range(days):
         day_clusters[d] = clusters[d % k][:]
@@ -388,73 +514,8 @@ def cluster_center(cluster: list[dict[str, Any]]) -> tuple[float, float] | None:
 
 
 # -----------------------------
-# Itinerary building
+# Meal picking (hard guarantee: dinner never None)
 # -----------------------------
-def _trip_days(start_date: str, end_date: str) -> int:
-    s = date.fromisoformat(start_date)
-    e = date.fromisoformat(end_date)
-    return max(1, (e - s).days + 1)
-
-
-def _rotate_neighborhoods(neighborhoods: list[str], days: int) -> list[str]:
-    if not neighborhoods:
-        return ["Central"] * days
-    seen: set[str] = set()
-    uniq: list[str] = []
-    for n in neighborhoods:
-        n2 = (n or "").strip()
-        if not n2 or n2 in seen:
-            continue
-        seen.add(n2)
-        uniq.append(n2)
-    if not uniq:
-        return ["Central"] * days
-    return [uniq[i % len(uniq)] for i in range(days)]
-
-
-def _pick_diverse_attractions_for_day(
-    day_candidates: list[dict[str, Any]],
-    used_sites: set[str],
-    count: int = ATTRACTIONS_PER_DAY,
-) -> list[dict[str, Any] | None]:
-    picked: list[dict[str, Any]] = []
-    day_types: set[str] = set()
-
-    for it in day_candidates:
-        nm = (it.get("name") or "").strip()
-        if not nm or nm in used_sites:
-            continue
-        types = _place_types(it)
-        if types and (types & day_types):
-            continue
-        picked.append(it)
-        used_sites.add(nm)
-        day_types |= types
-        if len(picked) >= count:
-            break
-
-    if len(picked) < count:
-        for it in day_candidates:
-            nm = (it.get("name") or "").strip()
-            if not nm or nm in used_sites:
-                continue
-            picked.append(it)
-            used_sites.add(nm)
-            if len(picked) >= count:
-                break
-
-    if len(picked) < count:
-        for it in day_candidates:
-            if len(picked) >= count:
-                break
-            picked.append(it)
-
-    while len(picked) < count:
-        picked.append(None)
-
-    return picked[:count]
-
-
 def _meal_kind(place: dict[str, Any] | None) -> str:
     if not place:
         return "unknown"
@@ -469,11 +530,21 @@ def pick_nearby_meals_for_day(
     restaurants_ranked: list[dict[str, Any]],
     used_restaurants: set[str],
     dietary_prefs: list[str],
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """
+    Returns (breakfast, lunch, dinner) and guarantees each is non-null and named.
+    """
+    # Ensure we have at least 1 named candidate
+    seed = _first_named(restaurants_ranked)
+    if seed is None:
+        # last-resort synthetic (should not happen because we fallback earlier)
+        seed = {"name": "Dinner recommendation", "address": None}
+
     scored: list[tuple[float, float, dict[str, Any]]] = []
+
     for r in restaurants_ranked:
-        nm = (r.get("name") or "").strip()
-        if not nm or nm in used_restaurants:
+        nm = _place_name(r)
+        if not nm:
             continue
         lat = _place_lat(r)
         lng = _place_lng(r)
@@ -482,47 +553,40 @@ def pick_nearby_meals_for_day(
             dist = haversine_m(center[0], center[1], lat, lng)
         scored.append((restaurant_score(r, dietary_prefs), -dist, r))
 
-    if not scored:
-        for r in restaurants_ranked:
-            nm = (r.get("name") or "").strip()
-            if not nm:
-                continue
-            lat = _place_lat(r)
-            lng = _place_lng(r)
-            dist = 0.0
-            if center and lat is not None and lng is not None:
-                dist = haversine_m(center[0], center[1], lat, lng)
-            scored.append((restaurant_score(r, dietary_prefs), -dist, r))
-
     scored.sort(reverse=True)
 
-    kinds: set[str] = set()
-
-    def pick_one(prefer: str | None) -> dict[str, Any] | None:
+    def pick(prefer_breakfast: bool = False, avoid: set[str] | None = None) -> dict[str, Any] | None:
+        avoid = avoid or set()
+        # pass 1: avoid used across trip
         for _, __, r in scored:
-            nm = (r.get("name") or "").strip()
-            if not nm or nm in used_restaurants:
+            nm = _place_name(r)
+            if not nm or nm in avoid or nm in used_restaurants:
                 continue
-            kind = _meal_kind(r)
-            if prefer and kind != prefer:
-                continue
-            if kind != "unknown" and kind in kinds:
+            if prefer_breakfast and _meal_kind(r) != "breakfast":
                 continue
             used_restaurants.add(nm)
-            kinds.add(kind)
+            return r
+        # pass 2: allow reuse if needed (avoid duplicates within the day)
+        for _, __, r in scored:
+            nm = _place_name(r)
+            if not nm or nm in avoid:
+                continue
+            if prefer_breakfast and _meal_kind(r) != "breakfast":
+                continue
             return r
         return None
 
-    breakfast = pick_one("breakfast") or pick_one(None)
-    lunch = pick_one(None)
-    dinner = pick_one(None)
+    breakfast = pick(prefer_breakfast=True) or pick(prefer_breakfast=False) or seed
+    lunch = pick(prefer_breakfast=False, avoid={_place_name(breakfast) or ""}) or seed
+    dinner = pick(prefer_breakfast=False, avoid={_place_name(breakfast) or "", _place_name(lunch) or ""}) or lunch or breakfast or seed
 
-    if breakfast is None and scored:
-        breakfast = scored[0][2]
-    if lunch is None and len(scored) > 1:
-        lunch = scored[1][2]
-    if dinner is None and len(scored) > 2:
-        dinner = scored[2][2]
+    # Final guarantee
+    if not _has_real_name(dinner):
+        dinner = lunch
+    if not _has_real_name(dinner):
+        dinner = breakfast
+    if not _has_real_name(dinner):
+        dinner = seed
 
     return breakfast, lunch, dinner
 
@@ -530,9 +594,9 @@ def pick_nearby_meals_for_day(
 def _blurb(place: dict[str, Any] | None, kind: str) -> str:
     if not place:
         return "A solid pick based on reviews and location."
-    name = place.get("name") or "This spot"
-    rating = place.get("rating")
-    cnt = place.get("user_ratings_total") or place.get("user_rating_count")
+    name = _place_name(place) or "This spot"
+    rating = _place_rating(place)
+    cnt = _place_user_rating_count(place)
     rating_part = ""
     if rating is not None:
         rating_part = f"Rated {rating}"
@@ -553,21 +617,75 @@ def _push_place(out: list[dict[str, Any]], *, day: int, category: str, place: di
         return
     lat = _place_lat(place)
     lng = _place_lng(place)
-    if lat is None or lng is None:
+    nm = _place_name(place)
+    if lat is None or lng is None or not nm:
         return
     out.append(
         {
             "day": day,
             "category": category,
-            "name": place.get("name"),
+            "name": nm,
             "address": _place_address(place),
             "lat": lat,
             "lng": lng,
             "google_maps_url": _place_maps_url(place),
-            "rating": place.get("rating"),
-            "user_rating_count": place.get("user_ratings_total") or place.get("user_rating_count"),
+            "rating": _place_rating(place),
+            "user_rating_count": _place_user_rating_count(place),
         }
     )
+
+
+# -----------------------------
+# Itinerary building
+# -----------------------------
+def _trip_days(start_date: str, end_date: str) -> int:
+    s = date.fromisoformat(start_date)
+    e = date.fromisoformat(end_date)
+    return max(1, (e - s).days + 1)
+
+
+def _rotate_neighborhoods(neighborhoods: list[str], days: int) -> list[str]:
+    if not neighborhoods:
+        return build_neighborhoods_fallback()[:days]
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for n in neighborhoods:
+        key = n.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        uniq.append(n.strip())
+    if not uniq:
+        return build_neighborhoods_fallback()[:days]
+    return [uniq[i % len(uniq)] for i in range(days)]
+
+
+def _pick_diverse_attractions_for_day(
+    day_candidates: list[dict[str, Any]],
+    used_sites: set[str],
+    count: int = ATTRACTIONS_PER_DAY,
+) -> list[dict[str, Any] | None]:
+    picked: list[dict[str, Any]] = []
+    for it in day_candidates:
+        nm = _place_name(it)
+        if not nm or nm in used_sites:
+            continue
+        picked.append(it)
+        used_sites.add(nm)
+        if len(picked) >= count:
+            break
+
+    # fill if needed
+    for it in day_candidates:
+        if len(picked) >= count:
+            break
+        if it not in picked:
+            picked.append(it)
+
+    while len(picked) < count:
+        picked.append(None)
+
+    return picked[:count]
 
 
 def build_rich_days_and_places(
@@ -607,21 +725,32 @@ def build_rich_days_and_places(
             dietary_prefs=dietary_prefs,
         )
 
+        # absolute belt+suspenders guarantee
+        if not _has_real_name(dinner):
+            dinner = lunch
+        if not _has_real_name(dinner):
+            dinner = breakfast
+        if not _has_real_name(dinner):
+            dinner = _first_named(restaurants_ranked) or dinner
+
         _push_place(places, day=day_num, category="breakfast", place=breakfast)
         _push_place(places, day=day_num, category="lunch", place=lunch)
         _push_place(places, day=day_num, category="dinner", place=dinner)
-
         for s in chosen_sites:
             _push_place(places, day=day_num, category="attraction", place=s)
 
-        hood = neighborhood_plan[i] if i < len(neighborhood_plan) else _infer_neighborhood_from_address(chosen_sites[0] or dinner)
-        featured_site = next((s for s in chosen_sites if s), None)
+        hood = neighborhood_plan[i] if i < len(neighborhood_plan) else "Downtown"
+        featured_site = next((s for s in chosen_sites if s and _has_real_name(s)), None)
 
         stops: list[dict[str, Any]] = [{"time_block": "Breakfast", "place": _place_line(breakfast)}]
-        time_blocks = ["Morning", "Late Morning", "Afternoon", "Late Afternoon"]
-        for tb, site in zip(time_blocks, chosen_sites):
+        for tb, site in zip(["Morning", "Late Morning", "Afternoon", "Late Afternoon"], chosen_sites):
             stops.append({"time_block": tb, "place": _place_line(site)})
-        stops.extend([{"time_block": "Lunch", "place": _place_line(lunch)}, {"time_block": "Dinner", "place": _place_line(dinner)}])
+        stops.extend(
+            [
+                {"time_block": "Lunch", "place": _place_line(lunch)},
+                {"time_block": "Dinner", "place": _place_line(dinner)},
+            ]
+        )
 
         itinerary.append(
             {
@@ -636,15 +765,15 @@ def build_rich_days_and_places(
                 "spotlight": {
                     "neighborhood": {
                         "name": hood,
-                        "blurb": f"Today is centered around **{hood}**—your attractions are clustered to minimize transit.",
+                        "blurb": f"Today is centered around **{hood}**—keep your stops close to cut transit time.",
                     },
                     "restaurant": {
-                        "name": (dinner or lunch or breakfast or {}).get("name"),
-                        "google_maps_url": _place_maps_url(dinner or lunch or breakfast),
-                        "blurb": _blurb(dinner or lunch or breakfast, "dinner"),
+                        "name": _place_name(dinner) or _place_name(lunch) or _place_name(breakfast),
+                        "google_maps_url": _place_maps_url(dinner) or _place_maps_url(lunch) or _place_maps_url(breakfast),
+                        "blurb": _blurb(dinner, "dinner"),
                     },
                     "site": {
-                        "name": (featured_site or {}).get("name"),
+                        "name": _place_name(featured_site),
                         "google_maps_url": _place_maps_url(featured_site),
                         "blurb": _blurb(featured_site, "site"),
                     },
@@ -653,11 +782,11 @@ def build_rich_days_and_places(
             }
         )
 
-    # De-dupe pins by (day, category, name)
+    # de-dupe pins by (day, category, name)
     seen = set()
     deduped: list[dict[str, Any]] = []
     for p in places:
-        key = (p.get("day"), p.get("category"), p.get("name"))
+        key = (p.get("day"), p.get("category"), (p.get("name") or "").lower())
         if key in seen:
             continue
         seen.add(key)
@@ -666,33 +795,42 @@ def build_rich_days_and_places(
     return itinerary, deduped
 
 
-# -----------------------------
-# Route: POST /api/trips/generate
-# -----------------------------
 @router.post("/generate", response_model=TripGenerateResponse)
 def generate_trip(payload: TripRequest) -> TripGenerateResponse:
     try:
         payload = _ensure_trip_request(payload)
-
         queries = build_place_queries(payload)
-
         dietary_prefs = _dietary_prefs_from_payload(payload)
 
-        restaurants = safe_search_places(queries["restaurants"], limit=DEFAULT_RESTAURANT_LIMIT)
-        hotels = safe_search_places(queries["hotels"], limit=DEFAULT_HOTEL_LIMIT)
-        highlights = safe_search_places(queries["highlights"], limit=DEFAULT_HIGHLIGHT_LIMIT)
-        neighborhood_results = safe_search_places(queries["neighborhoods"], limit=DEFAULT_NEIGHBORHOOD_LIMIT)
+        restaurants_raw = safe_search_places(queries["restaurants"], limit=DEFAULT_RESTAURANT_LIMIT)
+        hotels_raw = safe_search_places(queries["hotels"], limit=DEFAULT_HOTEL_LIMIT)
+        highlights_raw = safe_search_places(queries["highlights"], limit=DEFAULT_HIGHLIGHT_LIMIT)
+        neighborhood_raw = safe_search_places(queries["neighborhoods"], limit=DEFAULT_NEIGHBORHOOD_LIMIT)
+
         weather = safe_get_weather(payload.destination)
+
+        restaurants = [_normalize_place(p) for p in restaurants_raw] if restaurants_raw else build_restaurants_fallback(payload.destination)
+        hotels = [_normalize_place(p) for p in hotels_raw] if hotels_raw else build_hotels_fallback(payload.destination)
+        highlights = [_normalize_place(p) for p in highlights_raw] if highlights_raw else build_highlights_fallback(payload.destination)
+
+        # filter + dedupe so pickers always have real names
+        restaurants = _dedupe_by_name([p for p in restaurants if _has_real_name(p)])
+        highlights = _dedupe_by_name([p for p in highlights if _has_real_name(p)])
+        hotels = _dedupe_by_name([p for p in hotels if _has_real_name(p)])
 
         if not restaurants:
             restaurants = build_restaurants_fallback(payload.destination)
-        if not hotels:
-            hotels = build_hotels_fallback(payload.destination)
         if not highlights:
             highlights = build_highlights_fallback(payload.destination)
 
-        neighborhoods = [str(item.get("name")).strip() for item in neighborhood_results if item.get("name")]
-        neighborhoods = [n for n in neighborhoods if n] or build_neighborhoods_fallback()
+        neighborhoods: list[str] = []
+        for p in neighborhood_raw:
+            np = _normalize_place(p)
+            nm = _place_name(np)
+            if nm and _is_neighborhood_like(nm):
+                neighborhoods.append(nm)
+        # unique
+        neighborhoods = _rotate_neighborhoods(neighborhoods, days=_trip_days(payload.start_date, payload.end_date))
 
         itinerary, places = build_rich_days_and_places(
             destination=payload.destination,
@@ -704,21 +842,23 @@ def generate_trip(payload: TripRequest) -> TripGenerateResponse:
             dietary_prefs=dietary_prefs,
         )
 
-        # legacy pins (keep for backward compatibility)
+        # legacy pins (optional)
         map_points: list[dict[str, Any]] = []
         for category, items in [("restaurant", restaurants), ("hotel", hotels), ("highlight", highlights)]:
             for item in items:
                 lat = _place_lat(item)
                 lng = _place_lng(item)
-                if lat is None or lng is None:
+                nm = _place_name(item)
+                if lat is None or lng is None or not nm:
                     continue
-                map_points.append({"name": item.get("name"), "lat": lat, "lng": lng, "category": category})
+                map_points.append({"name": nm, "lat": lat, "lng": lng, "category": category})
 
         summary = payload.notes or f"Trip to {payload.destination}"
         tips = [
-            "Days are clustered by location to reduce transit time.",
-            "Meals are selected near each day’s cluster and boosted for dietary preferences.",
-            "Swap indoor/outdoor stops if weather shifts.",
+            "Keep each day in one area to reduce transit time.",
+            "Make dinner reservations for top-rated spots.",
+            "Swap indoor/outdoor stops based on weather.",
+            "Save Google Maps links for quick navigation.",
         ]
 
         return TripGenerateResponse(

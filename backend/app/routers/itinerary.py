@@ -1,662 +1,277 @@
-from fastapi import APIRouter
-from datetime import datetime, timedelta
+# backend/app/routers/itinerary.py
+from __future__ import annotations
 
-from app.schemas import TripRequest, TripResponse
-from app.services.google_places import search_places
-from app.services.weather import get_weather_for_destination
+from datetime import date
+from typing import Any
 
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-def build_dynamic_itinerary(payload: TripRequest) -> list[dict]:
-    prefs = payload.preferences or {}
-
-    dietary = prefs.get("dietary_preferences") or []
-    allergies = prefs.get("allergies") or []
-    accessibility = prefs.get("accessibility_needs") or []
-    meal_times = prefs.get("preferred_meal_times") or []
-    neighborhood_style = prefs.get("neighborhood_style") or []
-    top_interests = prefs.get("top_interests") or []
-    crowd_tolerance = prefs.get("crowd_tolerance")
-    day_start = prefs.get("day_start_preference")
-    nightlife = prefs.get("nightlife_interest")
-    shopping = prefs.get("shopping_interest")
-    wellness = prefs.get("wellness_interest")
-    photography = prefs.get("photography_interest")
-    transport = prefs.get("transport_preferences") or []
-
-    start = datetime.fromisoformat(payload.start_date).date()
-    end = datetime.fromisoformat(payload.end_date).date()
-    total_days = max(1, (end - start).days + 1)
-
-    itinerary = []
-
-    for i in range(total_days):
-        current_day = i + 1
-        notes = []
-
-        if dietary:
-            notes.append(f"Prioritize dining that supports {', '.join(dietary)}.")
-        if allergies:
-            notes.append(f"Avoid places involving {', '.join(allergies)}.")
-        if accessibility:
-            notes.append(f"Keep logistics aligned with {', '.join(accessibility)}.")
-        if crowd_tolerance == "low":
-            notes.append("Favor quieter time windows and lower-crowd stops.")
-        if transport:
-            notes.append(f"Prefer movement by {', '.join(transport[:3])}.")
-        if neighborhood_style:
-            notes.append(f"Spend time in areas that feel {', '.join(neighborhood_style[:2])}.")
-        if meal_times:
-            notes.append(f"Anchor meals around {', '.join(meal_times[:3])}.")
-        if photography == "high":
-            notes.append("Include photogenic locations.")
-        if shopping == "high":
-            notes.append("Include dedicated browsing or shopping time.")
-        if wellness == "high":
-            notes.append("Protect time for calmer restorative experiences.")
-
-        if current_day == 1:
-            title = f"Arrival and orientation in {payload.destination}"
-            morning = (
-                "Begin with a slower start and an easy breakfast nearby."
-                if day_start == "late"
-                else "Start with a smooth orientation walk and an easy first stop."
-            )
-            afternoon = "Explore one manageable neighborhood with low-friction logistics."
-            evening = "Settle into a dinner plan that matches your comfort, pace, and food preferences."
-        elif current_day == total_days:
-            title = f"Final favorites in {payload.destination}"
-            morning = "Revisit a favorite café, market, or neighborhood at an easy pace."
-            afternoon = "Use the afternoon for one last signature experience or scenic walk."
-            evening = "Finish with a memorable last dinner in an area that best fits your travel style."
-        else:
-            title = f"Day {current_day}: neighborhood discovery and signature experiences"
-            morning = "Start with coffee, breakfast, or a gentle local walk depending on preferred pace."
-
-            if "local culture" in top_interests or "architecture" in top_interests:
-                afternoon = "Explore a culturally rich district with food, design, and local atmosphere."
-            elif "museums" in top_interests:
-                afternoon = "Spend time around museums and nearby café or design-oriented stops."
-            elif "nature" in top_interests:
-                afternoon = "Spend time in parks, gardens, or calmer open-air spaces."
-            elif "shopping" in top_interests:
-                afternoon = "Focus on shopping streets, boutiques, and stylish neighborhood browsing."
-            else:
-                afternoon = "Spend the afternoon in a neighborhood that matches your saved preferences."
-
-            evening = (
-                "End with a lively dinner and optional nightlife."
-                if nightlife == "high"
-                else "End with a comfortable dinner and relaxed evening."
-            )
-
-        itinerary.append(
-            {
-                "day": current_day,
-                "title": title,
-                "morning": morning,
-                "afternoon": afternoon,
-                "evening": evening,
-                "meals": [
-                    "Choose a breakfast or café stop that fits the saved meal rhythm.",
-                    "Pick lunch and dinner aligned with dietary preferences and convenience level.",
-                ],
-                "notes": notes,
-            }
-        )
-
-    return itinerary
+# Reuse your existing working logic (queries, google places safe wrappers, fallbacks, weather)
+# These functions already exist in app/routers/trips.py in your repo.
+from app.routers.trips import (  # type: ignore
+    build_place_queries,
+    build_highlights_fallback,
+    build_hotels_fallback,
+    build_neighborhoods_fallback,
+    build_restaurants_fallback,
+    safe_get_weather,
+    safe_search_places,
+)
 
 router = APIRouter()
 
 
-def build_trip_summary(payload: TripRequest) -> str:
-    prefs = payload.preferences or {}
-    profile = payload.traveler_profile or {}
-
-    personality_label = profile.get("personality_label")
-    personality_summary = profile.get("summary")
-
-    top_interests = prefs.get("top_interests") or []
-    dietary = prefs.get("dietary_preferences") or []
-    allergies = prefs.get("allergies") or []
-    accessibility = prefs.get("accessibility_needs") or []
-    crowd_tolerance = prefs.get("crowd_tolerance")
-    day_start = prefs.get("day_start_preference")
-    neighborhood_style = prefs.get("neighborhood_style") or []
-    transport_preferences = prefs.get("transport_preferences") or []
-    meal_times = prefs.get("preferred_meal_times") or []
-    budget = prefs.get("budget")
-    pace = prefs.get("pace")
-    structure = prefs.get("structure_preference")
-    nightlife = prefs.get("nightlife_interest")
-    shopping = prefs.get("shopping_interest")
-    wellness = prefs.get("wellness_interest")
-    photography = prefs.get("photography_interest")
-
-    pieces: list[str] = []
-
-    if personality_label:
-        pieces.append(f"This itinerary is shaped for a {personality_label.lower()}.")
-
-    if personality_summary:
-        pieces.append(personality_summary)
-
-    if top_interests:
-        pieces.append(f"The plan leans into {', '.join(top_interests[:4])}.")
-
-    if neighborhood_style:
-        pieces.append(
-            f"It favors areas that feel {', '.join(neighborhood_style[:3])}."
-        )
-
-    if dietary:
-        pieces.append(
-            f"Dining recommendations reflect {', '.join(dietary)} preferences."
-        )
-
-    if allergies:
-        pieces.append(f"Food suggestions are mindful of {', '.join(allergies)}.")
-
-    if accessibility:
-        pieces.append(
-            f"Mobility and comfort planning accounts for {', '.join(accessibility)}."
-        )
-
-    if crowd_tolerance == "low":
-        pieces.append("Lower-crowd environments are prioritized where possible.")
-
-    if day_start == "late":
-        pieces.append("The schedule avoids overly early starts.")
-    elif day_start == "early":
-        pieces.append(
-            "Earlier starts are used when they improve flow and crowd avoidance."
-        )
-
-    if transport_preferences:
-        pieces.append(
-            f"Getting around is shaped around {', '.join(transport_preferences[:3])}."
-        )
-
-    if meal_times:
-        pieces.append(
-            f"Meal pacing follows preferences like {', '.join(meal_times[:3])}."
-        )
-
-    if budget:
-        pieces.append(f"The overall tone matches a {budget} budget.")
-
-    if pace:
-        pieces.append(f"Daily pacing is kept {pace}.")
-
-    if structure:
-        pieces.append(f"The trip structure is {structure}.")
-
-    if nightlife == "high":
-        pieces.append("Evenings include stronger nightlife potential.")
-    if shopping == "high":
-        pieces.append("Shopping opportunities are intentionally included.")
-    if wellness == "high":
-        pieces.append("Restorative and wellness-oriented moments are included.")
-    if photography == "high":
-        pieces.append("Photogenic stops and visual atmosphere are emphasized.")
-
-    if payload.notes:
-        pieces.append(f"Custom notes: {payload.notes}")
-
-    if payload.must_see:
-        pieces.append(
-            f"Must-see priorities include {', '.join(payload.must_see[:5])}."
-        )
-
-    return " ".join(pieces) or f"A personalized itinerary for {payload.destination}."
+class ItineraryGenerateRequest(BaseModel):
+    destination: str
+    start_date: str
+    end_date: str
+    notes: str | None = None
+    budget_level: str | None = "moderate"
+    preferences: dict[str, Any] | None = None
+    traveler_profile: dict[str, Any] | None = None
 
 
-def build_place_queries(payload: TripRequest) -> dict[str, str]:
-    prefs = payload.preferences or {}
-    dietary = prefs.get("dietary_preferences") or []
-    neighborhood_style = prefs.get("neighborhood_style") or []
-    top_interests = prefs.get("top_interests") or []
-
-    food_phrase = "restaurants"
-    if dietary:
-        food_phrase = f"{' '.join(dietary)} restaurants"
-
-    hotel_phrase = "boutique hotels"
-    budget = prefs.get("budget")
-    if budget == "budget":
-        hotel_phrase = "budget hotels"
-    elif budget == "luxury":
-        hotel_phrase = "luxury hotels"
-    elif budget == "premium":
-        hotel_phrase = "premium hotels"
-
-    highlight_phrase = "top attractions"
-    if "architecture" in top_interests:
-        highlight_phrase = "architecture landmarks"
-    elif "museums" in top_interests:
-        highlight_phrase = "best museums"
-    elif "nature" in top_interests:
-        highlight_phrase = "best parks and gardens"
-    elif "shopping" in top_interests:
-        highlight_phrase = "shopping districts and landmarks"
-    elif "local culture" in top_interests:
-        highlight_phrase = "cultural attractions and neighborhoods"
-
-    neighborhood_phrase = "best neighborhoods"
-    if neighborhood_style:
-        neighborhood_phrase = f"{' '.join(neighborhood_style[:2])} neighborhoods"
-
-    return {
-        "restaurants": f"{food_phrase} in {payload.destination}",
-        "hotels": f"{hotel_phrase} in {payload.destination}",
-        "highlights": f"{highlight_phrase} in {payload.destination}",
-        "neighborhoods": f"{neighborhood_phrase} in {payload.destination}",
-    }
+def _trip_days(start_date: str, end_date: str) -> int:
+    s = date.fromisoformat(start_date)
+    e = date.fromisoformat(end_date)
+    return max(1, (e - s).days + 1)
 
 
-def build_restaurants_fallback(payload: TripRequest) -> list[dict]:
-    prefs = payload.preferences or {}
-    dietary = prefs.get("dietary_preferences") or []
-    meal_style = prefs.get("meal_style")
-    food_adventure = prefs.get("food_adventure_level")
-    neighborhood_style = prefs.get("neighborhood_style") or []
+def _chunk(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
-    restaurants: list[dict] = []
 
-    if dietary:
-        restaurants.append(
-            {
-                "name": f"{payload.destination} dining for {', '.join(dietary)} preferences",
-                "address": None,
-                "rating": None,
-                "types": ["restaurant"],
-                "price_level": None,
-                "summary": "Use this as a starting point for diet-friendly restaurant discovery.",
-                "lat": None,
-                "lng": None,
-            }
-        )
+def _place_line(place: dict[str, Any] | None) -> str:
+    if not place:
+        return "a local spot"
+    name = place.get("name") or "a local spot"
+    addr = place.get("address") or place.get("formatted_address")
+    return f"{name} — {addr}" if addr else name
 
-    if meal_style:
-        restaurants.append(
-            {
-                "name": f"{meal_style.title()} dining in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["restaurant"],
-                "price_level": None,
-                "summary": "Suggested to match your preferred dining style.",
-                "lat": None,
-                "lng": None,
-            }
-        )
 
-    if food_adventure == "high":
-        restaurants.append(
-            {
-                "name": f"Adventurous local food experiences in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["restaurant", "food"],
-                "price_level": None,
-                "summary": "More exploratory dining ideas based on your profile.",
-                "lat": None,
-                "lng": None,
-            }
-        )
-    elif food_adventure == "low":
-        restaurants.append(
-            {
-                "name": f"Comfortable and approachable dining in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["restaurant"],
-                "price_level": None,
-                "summary": "Gentler food choices based on your comfort level.",
-                "lat": None,
-                "lng": None,
-            }
-        )
+def _infer_neighborhood_from_address(place: dict[str, Any] | None) -> str:
+    if not place:
+        return "Central"
+    addr = str(place.get("address") or place.get("formatted_address") or "").strip()
+    if not addr:
+        return "Central"
 
-    if neighborhood_style:
-        restaurants.append(
-            {
-                "name": f"Cafés and restaurants in {' / '.join(neighborhood_style[:2])}-style areas",
-                "address": None,
-                "rating": None,
-                "types": ["cafe", "restaurant"],
-                "price_level": None,
-                "summary": "Dining ideas aligned with your preferred neighborhood vibe.",
-                "lat": None,
-                "lng": None,
-            }
-        )
+    first = addr.split(",")[0].strip()
+    # If it looks like a street address (has digits), try token #2
+    if any(ch.isdigit() for ch in first):
+        parts = [p.strip() for p in addr.split(",") if p.strip()]
+        if len(parts) >= 2 and not any(ch.isdigit() for ch in parts[1]):
+            return parts[1]
+        return "Central"
+    return first or "Central"
 
-    restaurants.append(
+
+def _blurb(place: dict[str, Any] | None, kind: str) -> str:
+    if not place:
+        return "A solid pick based on reviews and location."
+    name = place.get("name") or "This spot"
+    rating = place.get("rating")
+    cnt = place.get("user_ratings_total") or place.get("user_rating_count")
+
+    rating_part = ""
+    if rating is not None:
+        rating_part = f"Rated {rating}"
+        if cnt:
+            rating_part += f" ({cnt} reviews)"
+        rating_part += ". "
+
+    if kind in {"breakfast", "lunch"}:
+        return f"{rating_part}{name} is convenient and well-reviewed—perfect for refueling between stops."
+    if kind == "dinner":
+        return f"{rating_part}{name} is a standout dinner option—great reviews and a strong local feel."
+    if kind == "site":
+        return f"{rating_part}{name} is a signature stop worth prioritizing for the experience."
+    return f"{rating_part}{name} is a highly rated option."
+
+
+def _push_place(
+    out: list[dict[str, Any]],
+    *,
+    day: int,
+    category: str,
+    place: dict[str, Any] | None,
+) -> None:
+    if not place:
+        return
+
+    lat = (
+        place.get("lat")
+        or place.get("latitude")
+        or (place.get("geometry") or {}).get("location", {}).get("lat")
+    )
+    lng = (
+        place.get("lng")
+        or place.get("longitude")
+        or (place.get("geometry") or {}).get("location", {}).get("lng")
+    )
+
+    if lat is None or lng is None:
+        return
+
+    out.append(
         {
-            "name": f"Reliable neighborhood cafés in {payload.destination}",
-            "address": None,
-            "rating": None,
-            "types": ["cafe"],
-            "price_level": None,
-            "summary": "Useful everyday stops for coffee, breakfast, or a casual reset.",
-            "lat": None,
-            "lng": None,
+            "day": day,
+            "category": category,
+            "name": place.get("name"),
+            "address": place.get("address") or place.get("formatted_address"),
+            "lat": lat,
+            "lng": lng,
+            "google_maps_url": place.get("google_maps_url") or place.get("url"),
+            "rating": place.get("rating"),
+            "user_rating_count": place.get("user_ratings_total") or place.get("user_rating_count"),
         }
     )
 
-    return restaurants[:5]
 
+def build_rich_days_and_places(
+    *,
+    destination: str,
+    start_date: str,
+    end_date: str,
+    restaurants: list[dict[str, Any]],
+    highlights: list[dict[str, Any]],
+    neighborhoods: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Day plan:
+      - 3 attractions per day (morning/midday/afternoon)
+      - breakfast/lunch/dinner
+      - spotlight: neighborhood + featured restaurant/site with blurbs
+    Also returns:
+      - places: flat list with day+category for your map.
+    """
+    days = _trip_days(start_date, end_date)
 
-def build_hotels_fallback(payload: TripRequest) -> list[dict]:
-    prefs = payload.preferences or {}
-    lodging = prefs.get("lodging_preference")
-    budget = prefs.get("budget")
+    attraction_groups = _chunk(highlights, 3) or [[]]
+    meal_groups = _chunk(restaurants, 3) or [[]]  # breakfast/lunch/dinner candidates
 
-    summary_parts = []
-    if lodging:
-        summary_parts.append(lodging)
-    if budget:
-        summary_parts.append(budget)
+    itinerary: list[dict[str, Any]] = []
+    places: list[dict[str, Any]] = []
 
-    descriptor = " ".join(summary_parts).strip() or "well-located"
+    for i in range(days):
+        day_num = i + 1
+        ats = attraction_groups[i % len(attraction_groups)]
+        ms = meal_groups[i % len(meal_groups)]
 
-    return [
-        {
-            "name": f"{descriptor.title()} hotel options in {payload.destination}",
-            "address": None,
-            "rating": None,
-            "types": ["lodging"],
-            "price_level": None,
-            "summary": "Hotel ideas matched to your saved lodging and budget preferences.",
-            "lat": None,
-            "lng": None,
-        },
-        {
-            "name": f"Neighborhood-based stays in {payload.destination}",
-            "address": None,
-            "rating": None,
-            "types": ["lodging"],
-            "price_level": None,
-            "summary": "Useful for choosing an area that fits your vibe and transit preferences.",
-            "lat": None,
-            "lng": None,
-        },
-    ]
+        breakfast = ms[0] if len(ms) > 0 else None
+        lunch = ms[1] if len(ms) > 1 else None
+        dinner = ms[2] if len(ms) > 2 else None
 
+        a1 = ats[0] if len(ats) > 0 else None
+        a2 = ats[1] if len(ats) > 1 else None
+        a3 = ats[2] if len(ats) > 2 else None
 
-def build_highlights_fallback(payload: TripRequest) -> list[dict]:
-    prefs = payload.preferences or {}
-    top_interests = prefs.get("top_interests") or []
+        _push_place(places, day=day_num, category="breakfast", place=breakfast)
+        _push_place(places, day=day_num, category="attraction", place=a1)
+        _push_place(places, day=day_num, category="attraction", place=a2)
+        _push_place(places, day=day_num, category="attraction", place=a3)
+        _push_place(places, day=day_num, category="lunch", place=lunch)
+        _push_place(places, day=day_num, category="dinner", place=dinner)
 
-    highlights: list[dict] = []
+        hood = neighborhoods[i % len(neighborhoods)] if neighborhoods else _infer_neighborhood_from_address(a1 or dinner or lunch)
 
-    if "architecture" in top_interests:
-        highlights.append(
+        itinerary.append(
             {
-                "name": f"Architectural highlights in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["tourist_attraction", "point_of_interest"],
-                "price_level": None,
-                "summary": "Focus on visually striking buildings, districts, and design-forward areas.",
-                "lat": None,
-                "lng": None,
+                "day": day_num,
+                "title": f"Day {day_num} in {destination}",
+                "meals": {
+                    "breakfast": {"place": _place_line(breakfast), "blurb": _blurb(breakfast, "breakfast")},
+                    "lunch": {"place": _place_line(lunch), "blurb": _blurb(lunch, "lunch")},
+                    "dinner": {"place": _place_line(dinner), "blurb": _blurb(dinner, "dinner")},
+                },
+                "stops": [
+                    {"time_block": "Breakfast", "place": _place_line(breakfast)},
+                    {"time_block": "Morning", "place": _place_line(a1)},
+                    {"time_block": "Midday", "place": _place_line(a2)},
+                    {"time_block": "Afternoon", "place": _place_line(a3)},
+                    {"time_block": "Lunch", "place": _place_line(lunch)},
+                    {"time_block": "Dinner", "place": _place_line(dinner)},
+                ],
+                "spotlight": {
+                    "neighborhood": {
+                        "name": hood,
+                        "blurb": f"Today is centered around **{hood}**—keep your stops close to cut transit time.",
+                    },
+                    "restaurant": {
+                        "name": (dinner or lunch or breakfast or {}).get("name"),
+                        "google_maps_url": (dinner or lunch or breakfast or {}).get("google_maps_url")
+                        or (dinner or lunch or breakfast or {}).get("url"),
+                        "blurb": _blurb(dinner or lunch or breakfast, "dinner"),
+                    },
+                    "site": {
+                        "name": (a1 or a2 or a3 or {}).get("name"),
+                        "google_maps_url": (a1 or a2 or a3 or {}).get("google_maps_url")
+                        or (a1 or a2 or a3 or {}).get("url"),
+                        "blurb": _blurb(a1 or a2 or a3, "site"),
+                    },
+                },
+                "notes": [],
             }
         )
 
-    if "museums" in top_interests:
-        highlights.append(
-            {
-                "name": f"Museum picks in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["museum", "point_of_interest"],
-                "price_level": None,
-                "summary": "Suggested museum-oriented stops based on your interests.",
-                "lat": None,
-                "lng": None,
-            }
-        )
+    # De-dupe pins by (day, category, name)
+    seen = set()
+    deduped: list[dict[str, Any]] = []
+    for p in places:
+        key = (p.get("day"), p.get("category"), p.get("name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(p)
 
-    if "nature" in top_interests:
-        highlights.append(
-            {
-                "name": f"Parks and gardens in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["park", "point_of_interest"],
-                "price_level": None,
-                "summary": "Green spaces that suit a calmer or more restorative rhythm.",
-                "lat": None,
-                "lng": None,
-            }
-        )
-
-    if "shopping" in top_interests:
-        highlights.append(
-            {
-                "name": f"Shopping areas in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["shopping_mall", "point_of_interest"],
-                "price_level": None,
-                "summary": "Retail-oriented areas matched to your profile.",
-                "lat": None,
-                "lng": None,
-            }
-        )
-
-    if not highlights:
-        highlights.append(
-            {
-                "name": f"Signature highlights in {payload.destination}",
-                "address": None,
-                "rating": None,
-                "types": ["tourist_attraction", "point_of_interest"],
-                "price_level": None,
-                "summary": "A general starting point for major sights and experiences.",
-                "lat": None,
-                "lng": None,
-            }
-        )
-
-    return highlights[:6]
+    return itinerary, deduped
 
 
-def build_neighborhoods_fallback(payload: TripRequest) -> list[str]:
-    prefs = payload.preferences or {}
-    neighborhood_style = prefs.get("neighborhood_style") or []
-    top_interests = prefs.get("top_interests") or []
-
-    neighborhoods: list[str] = []
-
-    if neighborhood_style:
-        neighborhoods.extend(neighborhood_style[:3])
-
-    if not neighborhoods and top_interests:
-        neighborhoods.extend(top_interests[:3])
-
-    if not neighborhoods:
-        neighborhoods = [
-            "walkable central district",
-            "quiet local neighborhood",
-            "food-focused area",
-        ]
-
-    return neighborhoods[:4]
-
-
-def build_mock_itinerary(payload: TripRequest) -> list[dict]:
-    prefs = payload.preferences or {}
-
-    dietary = prefs.get("dietary_preferences") or []
-    allergies = prefs.get("allergies") or []
-    accessibility = prefs.get("accessibility_needs") or []
-    meal_times = prefs.get("preferred_meal_times") or []
-    neighborhood_style = prefs.get("neighborhood_style") or []
-    top_interests = prefs.get("top_interests") or []
-    crowd_tolerance = prefs.get("crowd_tolerance")
-    day_start = prefs.get("day_start_preference")
-    nightlife = prefs.get("nightlife_interest")
-    shopping = prefs.get("shopping_interest")
-    wellness = prefs.get("wellness_interest")
-    photography = prefs.get("photography_interest")
-    transport = prefs.get("transport_preferences") or []
-
-    day1_notes: list[str] = []
-    day2_notes: list[str] = []
-
-    if dietary:
-        day1_notes.append(f"Prioritize dining options that support {', '.join(dietary)}.")
-    if allergies:
-        day1_notes.append(f"Avoid recommendations with {', '.join(allergies)}.")
-    if accessibility:
-        day1_notes.append(f"Keep logistics aligned with {', '.join(accessibility)}.")
-    if crowd_tolerance == "low":
-        day1_notes.append("Favor quieter time windows and less crowded stops.")
-    if transport:
-        day1_notes.append(f"Prefer movement by {', '.join(transport[:3])}.")
-
-    if neighborhood_style:
-        day2_notes.append(
-            f"Spend more time in areas that feel {', '.join(neighborhood_style[:2])}."
-        )
-    if meal_times:
-        day2_notes.append(f"Anchor food stops around {', '.join(meal_times[:3])}.")
-    if photography == "high":
-        day2_notes.append("Include visually strong and photogenic locations.")
-    if shopping == "high":
-        day2_notes.append("Include dedicated browsing or shopping time.")
-    if wellness == "high":
-        day2_notes.append("Protect time for calmer, restorative experiences.")
-
-    morning_one = (
-        "Begin with a slower start and an easy breakfast nearby."
-        if day_start == "late"
-        else "Start with a smooth orientation walk and an easy first stop."
-    )
-
-    evening_two = (
-        "End with a lively dinner and optional nightlife."
-        if nightlife == "high"
-        else "End with a comfortable dinner and relaxed evening."
-    )
-
-    afternoon_two = (
-        "Explore a culturally rich district with food, design, and local atmosphere."
-        if "local culture" in top_interests or "architecture" in top_interests
-        else "Spend the afternoon in a neighborhood that matches your saved preferences."
-    )
-
-    return [
-        {
-            "day": 1,
-            "title": f"Arrival and easy orientation in {payload.destination}",
-            "morning": morning_one,
-            "afternoon": "Explore one manageable neighborhood with low-friction logistics and a good food anchor.",
-            "evening": "Settle into a dinner plan that matches your comfort, pace, and dietary needs.",
-            "meals": [
-                "Choose a breakfast or café stop that fits the saved meal rhythm.",
-                "Pick a dinner aligned with dietary preferences and convenience level.",
-            ],
-            "notes": day1_notes,
-        },
-        {
-            "day": 2,
-            "title": "Neighborhood discovery and signature experiences",
-            "morning": "Start with coffee, breakfast, or a gentle local walk depending on preferred pace.",
-            "afternoon": afternoon_two,
-            "evening": evening_two,
-            "meals": [
-                "Lunch in a neighborhood spot with strong local character.",
-                "Dinner selected for atmosphere, fit, and ease of access.",
-            ],
-            "notes": day2_notes,
-        },
-    ]
-
-
-def safe_search_places(query: str, limit: int) -> list[dict]:
-    print(f"[PLACES] query={query} limit={limit}")
+@router.post("/generate")
+def generate_itinerary(payload: ItineraryGenerateRequest) -> dict[str, Any]:
+    """
+    Generates itinerary + map places without creating/storing a trip.
+    Mount this router at /api/itinerary in app/main.py to use it.
+    """
     try:
-        results = search_places(query, limit=limit)
-        print(f"[PLACES] returned {len(results)} results")
-        if results:
-            print(f"[PLACES] first result: {results[0]}")
-        return results
+        # Reuse your existing query builder and safe wrappers from trips.py
+        # Build a TripRequest-like object using payload dict
+        payload_dict = payload.model_dump()
+        queries = build_place_queries(payload_dict)  # your trips.py accepts payload-ish input
+
+        restaurants = safe_search_places(queries["restaurants"], limit=12)
+        highlights = safe_search_places(queries["highlights"], limit=18)
+        neighborhood_results = safe_search_places(queries["neighborhoods"], limit=6)
+        weather = safe_get_weather(payload.destination)
+
+        if not restaurants:
+            restaurants = build_restaurants_fallback(payload_dict)
+        if not highlights:
+            highlights = build_highlights_fallback(payload_dict)
+
+        neighborhoods = [x["name"] for x in neighborhood_results if x.get("name")]
+        if not neighborhoods:
+            neighborhoods = build_neighborhoods_fallback(payload_dict)
+
+        itinerary, places = build_rich_days_and_places(
+            destination=payload.destination,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            restaurants=restaurants,
+            highlights=highlights,
+            neighborhoods=neighborhoods,
+        )
+
+        return {
+            "destination": payload.destination,
+            "summary": payload.notes or "",
+            "weather": weather,
+            "neighborhoods": neighborhoods,
+            "restaurants": restaurants,
+            "highlights": highlights,
+            "itinerary": itinerary,
+            "places": places,
+        }
     except Exception as exc:
-        print(f"[PLACES] FAILED for query '{query}': {exc}")
-        return []
-
-
-def safe_get_weather(destination: str) -> dict | None:
-    print(f"[WEATHER] destination={destination}")
-    try:
-        result = get_weather_for_destination(destination)
-        print(f"[WEATHER] result={result}")
-        return result
-    except Exception as exc:
-        print(f"[WEATHER] FAILED for destination '{destination}': {exc}")
-        return None
-
-
-@router.post("/generate", response_model=TripResponse)
-def generate_trip(payload: TripRequest) -> TripResponse:
-    queries = build_place_queries(payload)
-
-    restaurants = safe_search_places(queries["restaurants"], limit=5)
-    hotels = safe_search_places(queries["hotels"], limit=5)
-    highlights = safe_search_places(queries["highlights"], limit=6)
-    neighborhood_results = safe_search_places(queries["neighborhoods"], limit=4)
-    weather = safe_get_weather(payload.destination)
-
-    if not restaurants:
-        restaurants = build_restaurants_fallback(payload)
-
-    if not hotels:
-        hotels = build_hotels_fallback(payload)
-
-    if not highlights:
-        highlights = build_highlights_fallback(payload)
-
-    neighborhoods = [
-        item["name"] for item in neighborhood_results if item.get("name")
-    ]
-    if not neighborhoods:
-        neighborhoods = build_neighborhoods_fallback(payload)
-
-    map_points: list[dict] = []
-    for category, items in [
-        ("restaurant", restaurants),
-        ("hotel", hotels),
-        ("highlight", highlights),
-    ]:
-        for item in items:
-            if item.get("lat") is not None and item.get("lng") is not None:
-                map_points.append(
-                    {
-                        "name": item["name"],
-                        "category": category,
-                        "lat": item["lat"],
-                        "lng": item["lng"],
-                    }
-                )
-
-    return TripResponse(
-        destination=payload.destination,
-        summary=build_trip_summary(payload),
-        weather=weather,
-        neighborhoods=neighborhoods,
-        restaurants=restaurants,
-        hotels=hotels,
-        highlights=highlights,
-        map_points=map_points,
-        itinerary=build_dynamic_itinerary(payload),
-        tips=[
-            "Cluster activities by neighborhood to reduce transit friction.",
-            "Use saved dietary and allergy signals before locking restaurant choices.",
-            "Match reservation timing to the saved day-start and meal-rhythm preferences.",
-            "Use quieter time windows for major sights if crowd tolerance is low.",
-        ],
-    )
+        raise HTTPException(status_code=500, detail=str(exc))

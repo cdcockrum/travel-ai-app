@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.profile import router as profile_router
 from app.routers.itinerary import router as itinerary_router
 from app.routers.advisory import router as advisory_router
+from app.routers.itinerary import router as itinerary_router
+
 
 app = FastAPI(title="Travel AI App API")
 
@@ -25,7 +27,7 @@ app.add_middleware(
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(itinerary_router, prefix="/api/trips", tags=["trips"])
 app.include_router(advisory_router, prefix="/api/advisory", tags=["advisory"])
-
+app.include_router(itinerary_router, prefix="/api/itinerary", tags=["itinerary"])
 
 @app.get("/health")
 def health_check():
